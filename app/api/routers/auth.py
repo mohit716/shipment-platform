@@ -6,6 +6,7 @@ from sqlmodel import select
 
 from app.api.deps import CurrentUser, NotifierDep
 from app.core.config import settings
+from app.core.ratelimit import enforce_login_rate_limit
 from app.core.security import hash_password, verify_password
 from app.core.tokens import (
     TokenError,
@@ -32,7 +33,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     "/token",
     response_model=Token,
     summary="Exchange credentials for an access token",
-    responses={401: {"description": "Those credentials are not valid."}},
+    responses={
+        401: {"description": "Those credentials are not valid."},
+        429: {"description": "Too many attempts from this address."},
+    },
+    # A dependency with no return value, declared here rather than in the
+    # signature because the handler has no use for it. It runs before the body
+    # and raises 429 on its own.
+    dependencies=[Depends(enforce_login_rate_limit)],
 )
 async def login(
     # OAuth2PasswordRequestForm reads form-encoded username and password, not
@@ -98,6 +106,9 @@ async def verify_email(body: VerificationRequest, session: SessionDep) -> User:
     "/forgot-password",
     status_code=status.HTTP_202_ACCEPTED,
     summary="Request a password reset link",
+    # Limited on the same bucket. Without it this route is a free way to send
+    # mail to any address, repeatedly, on someone else's behalf.
+    dependencies=[Depends(enforce_login_rate_limit)],
 )
 async def forgot_password(
     body: ForgotPasswordRequest,

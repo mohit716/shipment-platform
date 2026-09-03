@@ -10,6 +10,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 
 from app.core.config import settings
+from app.core.ratelimit import login_limiter
 from app.db.session import get_session
 from app.main import app
 from app.models.user import User
@@ -63,6 +64,17 @@ async def session_factory_fixture(tmp_path: Path) -> AsyncIterator[object]:
     yield factory
 
     await engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits() -> None:
+    """Empty the rate limiter between tests.
+
+    It is process-global state, so without this the tests interfere with each
+    other in whatever order they happen to run, and the failure looks like a
+    flaky test rather than shared state.
+    """
+    login_limiter.reset()
 
 
 @pytest.fixture(name="outbox")

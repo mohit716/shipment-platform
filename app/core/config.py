@@ -88,6 +88,17 @@ class Settings(BaseSettings):
     # site call this API with a user's token.
     log_level: str = "INFO"
 
+    # Guessing passwords is cheap for an attacker and expensive for the server,
+    # since every attempt costs a bcrypt hash. Ten per five minutes is generous
+    # for a person mistyping and hopeless for a script.
+    login_rate_limit: int = 10
+    login_rate_limit_window_seconds: int = 300
+
+    # Only set this where a proxy really does sit in front of the API and
+    # rewrites the header. X-Forwarded-For is trivially spoofed, so trusting it
+    # anywhere else hands every attacker an unlimited supply of identities.
+    trust_proxy_headers: bool = False
+
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
