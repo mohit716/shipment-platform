@@ -1,6 +1,6 @@
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Path, status
 
 app = FastAPI(
     title="FleetLine",
@@ -49,5 +49,14 @@ def list_shipments() -> list[dict[str, Any]]:
 
 
 @app.get("/shipments/{shipment_id}", tags=["shipments"], summary="Read one shipment")
-def get_shipment(shipment_id: int) -> dict[str, Any] | None:
+def get_shipment(
+    shipment_id: Annotated[
+        int,
+        Path(
+            ge=10000,
+            le=99999,
+            description="Five digit shipment reference.",
+        ),
+    ],
+) -> dict[str, Any] | None:
     return shipments.get(shipment_id)
