@@ -1,6 +1,6 @@
-from typing import Annotated, Any
+from fastapi import FastAPI, status
 
-from fastapi import FastAPI, HTTPException, Path, status
+from app.api.routers import shipment
 
 app = FastAPI(
     title="FleetLine",
@@ -8,35 +8,7 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Stand-in for a database while the HTTP layer is being built. Everything here is
-# lost when the process restarts; PostgreSQL replaces it in a later phase.
-shipments: dict[int, dict[str, Any]] = {
-    12701: {
-        "id": 12701,
-        "content": "ceramic dinnerware",
-        "weight_kg": 2.4,
-        "destination": 11001,
-        "status": "in_transit",
-    },
-    12702: {
-        "id": 12702,
-        "content": "laptop parts",
-        "weight_kg": 0.9,
-        "destination": 40015,
-        "status": "placed",
-    },
-}
-
-
-def require_shipment(shipment_id: int) -> dict[str, Any]:
-    """Return a shipment or abort the request with 404."""
-    shipment = shipments.get(shipment_id)
-    if shipment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Shipment {shipment_id} does not exist.",
-        )
-    return shipment
+app.include_router(shipment.router)
 
 
 @app.get("/")
@@ -52,68 +24,3 @@ def read_root() -> dict[str, str]:
 )
 def health_check() -> dict[str, str]:
     return {"status": "ok", "version": app.version}
-
-
-@app.get("/shipments", tags=["shipments"], summary="List every shipment")
-def list_shipments() -> list[dict[str, Any]]:
-    return list(shipments.values())
-
-
-@app.get("/shipments/{shipment_id}", tags=["shipments"], summary="Read one shipment")
-def get_shipment(
-    shipment_id: Annotated[
-        int,
-        Path(
-            ge=10000,
-            le=99999,
-            description="Five digit shipment reference.",
-        ),
-    ],
-) -> dict[str, Any]:
-    return require_shipment(shipment_id)
-
-
-@app.post(
-    "/shipments",
-    status_code=status.HTTP_201_CREATED,
-    tags=["shipments"],
-    summary="Book a shipment",
-)
-def create_shipment(body: dict[str, Any]) -> dict[str, Any]:
-    # Accepting a bare dict means anything at all is accepted: missing fields,
-    # a weight of "heavy", unknown keys. Pydantic models fix this in phase 2.
-    new_id = max(shipments) + 1
-    shipments[new_id] = {"id": new_id, **body}
-    return shipments[new_id]
-
-
-@app.put("/shipments/{shipment_id}", tags=["shipments"], summary="Replace a shipment")
-def replace_shipment(shipment_id: int, body: dict[str, Any]) -> dict[str, Any]:
-    # PUT is a full replacement: the stored record becomes exactly what was sent,
-    # so any field the client omits is dropped.
-    require_shipment(shipment_id)
-    shipments[shipment_id] = {"id": shipment_id, **body}
-    return shipments[shipment_id]
-
-
-@app.patch(
-    "/shipments/{shipment_id}",
-    tags=["shipments"],
-    summary="Update part of a shipment",
-)
-def update_shipment(shipment_id: int, body: dict[str, Any]) -> dict[str, Any]:
-    # PATCH merges: only the keys present in the body are touched, which is what
-    # a status update from a warehouse scanner actually needs.
-    shipment = require_shipment(shipment_id)
-    shipment.update(body)
-    return shipment
-
-
-@app.delete(
-    "/shipments/{shipment_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    tags=["shipments"],
-    summary="Cancel a shipment",
-)
-def delete_shipment(shipment_id: int) -> None:
-    shipments.pop(shipment_id, None)
