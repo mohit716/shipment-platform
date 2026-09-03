@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, status
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routers import auth, shipment, tag, user, warehouse
 from app.core.config import settings
@@ -65,6 +66,23 @@ app = FastAPI(
     openapi_tags=TAGS_METADATA,
     contact={"name": "Mohit Sharma", "url": "https://github.com/mohit716"},
     license_info={"name": "MIT"},
+)
+
+# A browser refuses to let JavaScript on one origin read a response from
+# another unless the server says so. The dashboard runs on a different port
+# during development, which is a different origin, so without this every fetch
+# from it fails in the browser while the same request from curl succeeds.
+app.add_middleware(
+    CORSMiddleware,
+    # An explicit list, not "*". A wildcard cannot be combined with credentials,
+    # and allowing any site to call the API with a user's token is exactly what
+    # the rule exists to prevent.
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    # Authorization is not in the browser's default safelist, so a preflight
+    # that does not mention it rejects every authenticated request.
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(auth.router)

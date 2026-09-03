@@ -83,6 +83,14 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6380/0"
     celery_result_backend: str = "redis://localhost:6380/1"
 
+    # Origins the dashboard is served from. A list rather than a wildcard,
+    # because a wildcard cannot be combined with credentials and would let any
+    # site call this API with a user's token.
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
 
 @lru_cache
 def get_settings() -> Settings:
