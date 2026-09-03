@@ -1,7 +1,8 @@
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.session import SessionDep
 from app.models.shipment import Shipment
@@ -20,9 +21,9 @@ ShipmentId = Annotated[
 ]
 
 
-def require_shipment(session: Session, shipment_id: int) -> Shipment:
+async def require_shipment(session: AsyncSession, shipment_id: int) -> Shipment:
     """Return a shipment row or abort the request with 404."""
-    shipment = session.get(Shipment, shipment_id)
+    shipment = await session.get(Shipment, shipment_id)
     if shipment is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -32,7 +33,7 @@ def require_shipment(session: Session, shipment_id: int) -> Shipment:
 
 
 @router.get("", response_model=list[ShipmentRead], summary="List shipments")
-def list_shipments(
+async def list_shipments(
     session: SessionDep,
     status_filter: Annotated[
         ShipmentStatus | None,
@@ -53,7 +54,8 @@ def list_shipments(
     if destination is not None:
         statement = statement.where(Shipment.destination == destination)
     statement = statement.order_by(Shipment.id).offset(offset).limit(limit)
-    return list(session.exec(statement).all())
+    results = await session.exec(statement)
+    return list(results.all())
 
 
 @router.get(
@@ -62,8 +64,8 @@ def list_shipments(
     summary="Read one shipment",
     responses={404: {"description": "No shipment carries that reference."}},
 )
-def get_shipment(shipment_id: ShipmentId, session: SessionDep) -> Shipment:
-    return require_shipment(session, shipment_id)
+async def get_shipment(shipment_id: ShipmentId, session: SessionDep) -> Shipment:
+    return await require_shipment(session, shipment_id)
 
 
 @router.post(
@@ -76,13 +78,13 @@ def get_shipment(shipment_id: ShipmentId, session: SessionDep) -> Shipment:
         422: {"description": "The parcel breaches a weight, size or content rule."}
     },
 )
-def create_shipment(body: ShipmentCreate, session: SessionDep) -> Shipment:
+async def create_shipment(body: ShipmentCreate, session: SessionDep) -> Shipment:
     shipment = Shipment(**body.model_dump())
     session.add(shipment)
-    session.commit()
+    await session.commit()
     # The id was assigned by the database during commit, so the in-memory
     # object is stale until it is refreshed from the row.
-    session.refresh(shipment)
+    await session.refresh(shipment)
     return shipment
 
 
@@ -91,17 +93,17 @@ def create_shipment(body: ShipmentCreate, session: SessionDep) -> Shipment:
     response_model=ShipmentRead,
     summary="Replace a shipment",
 )
-def replace_shipment(
+async def replace_shipment(
     shipment_id: ShipmentId,
     body: ShipmentCreate,
     session: SessionDep,
 ) -> Shipment:
-    shipment = require_shipment(session, shipment_id)
+    shipment = await require_shipment(session, shipment_id)
     for field, value in body.model_dump().items():
         setattr(shipment, field, value)
     session.add(shipment)
-    session.commit()
-    session.refresh(shipment)
+    await session.commit()
+    await session.refresh(shipment)
     return shipment
 
 
@@ -110,19 +112,19 @@ def replace_shipment(
     response_model=ShipmentRead,
     summary="Update part of a shipment",
 )
-def update_shipment(
+async def update_shipment(
     shipment_id: ShipmentId,
     body: ShipmentUpdate,
     session: SessionDep,
 ) -> Shipment:
-    shipment = require_shipment(session, shipment_id)
+    shipment = await require_shipment(session, shipment_id)
     # exclude_unset keeps fields the client never mentioned out of the update,
     # which is the difference between "leave it alone" and "set it to null".
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(shipment, field, value)
     session.add(shipment)
-    session.commit()
-    session.refresh(shipment)
+    await session.commit()
+    await session.refresh(shipment)
     return shipment
 
 
@@ -131,7 +133,7 @@ def update_shipment(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Cancel a shipment",
 )
-def delete_shipment(shipment_id: ShipmentId, session: SessionDep) -> None:
-    shipment = require_shipment(session, shipment_id)
-    session.delete(shipment)
-    session.commit()
+async def delete_shipment(shipment_id: ShipmentId, session: SessionDep) -> None:
+    shipment = await require_shipment(session, shipment_id)
+    await session.delete(shipment)
+    await session.commit()

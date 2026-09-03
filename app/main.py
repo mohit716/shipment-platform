@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     deprecated. Everything before yield happens before the first request is
     served; everything after runs during a clean shutdown.
     """
-    create_db_and_tables()
+    await create_db_and_tables()
     yield
 
 
