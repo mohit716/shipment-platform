@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     # expiry is the only thing limiting the damage from a stolen one.
     access_token_expire_minutes: int = 30
 
+    # bcrypt's work factor. Each step doubles the time to hash, which is the
+    # point in production and pure waste in a test suite that hashes hundreds
+    # of throwaway passwords, so the tests turn it down to the minimum.
+    bcrypt_rounds: int = 12
+
 
 @lru_cache
 def get_settings() -> Settings:

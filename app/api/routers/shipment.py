@@ -6,14 +6,15 @@ from sqlalchemy.orm import aliased, selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.deps import CurrentUser
 from app.api.routers.tag import TagId, require_tag
-from app.api.routers.user import require_user
 from app.api.routers.warehouse import WarehouseId, require_warehouse
 from app.db.session import SessionDep
 from app.models.package import Package
 from app.models.shipment import Shipment
 from app.models.tag import ShipmentTagLink, Tag
 from app.models.tracking import TrackingEvent
+from app.models.user import User
 from app.models.warehouse import ShipmentWarehouseLink, Warehouse
 from app.schemas.tag import TagRead
 from app.schemas.tracking import TrackingEventCreate, TrackingEventRead
@@ -39,6 +40,7 @@ async def require_shipment(
     session: AsyncSession,
     shipment_id: int,
     *,
+    owner: User | None = None,
     with_relations: bool = False,
 ) -> Shipment:
     """Return a shipment row or abort the request with 404.
@@ -47,6 +49,11 @@ async def require_shipment(
     touches those collections must ask for them: reading an unloaded
     relationship inside async code raises MissingGreenlet rather than quietly
     emitting an extra query the way sync code would.
+
+    owner enforces that the caller booked the shipment. A shipment belonging to
+    somebody else is reported as 404 rather than 403, because 403 confirms the
+    reference exists and lets an unauthorised caller map the id space by
+    watching which numbers answer differently.
     """
     if with_relations:
         statement = (
@@ -63,7 +70,7 @@ async def require_shipment(
     else:
         shipment = await session.get(Shipment, shipment_id)
 
-    if shipment is None:
+    if shipment is None or (owner is not None and shipment.customer_id != owner.id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Shipment {shipment_id} does not exist.",
@@ -74,13 +81,10 @@ async def require_shipment(
 @router.get("", response_model=list[ShipmentRead], summary="List shipments")
 async def list_shipments(
     session: SessionDep,
+    current_user: CurrentUser,
     status_filter: Annotated[
         ShipmentStatus | None,
         Query(alias="status", description="Return only shipments in this state."),
-    ] = None,
-    customer_id: Annotated[
-        int | None,
-        Query(ge=1, description="Filter to one customer's shipments."),
     ] = None,
     destination: Annotated[
         int | None,
@@ -99,11 +103,15 @@ async def list_shipments(
 ) -> list[Shipment]:
     # The statement is built up conditionally and only executed at the end, so
     # the unfiltered case never loads the whole table into memory.
-    statement = select(Shipment)
+    #
+    # The owner filter is applied first and is not optional. Scoping in the
+    # query rather than filtering the results afterwards means another
+    # customer's rows are never loaded at all, and no future filter or
+    # pagination bug can widen it. The ?customer_id= parameter is gone: the
+    # token already says who is asking.
+    statement = select(Shipment).where(Shipment.customer_id == current_user.id)
     if status_filter is not None:
         statement = statement.where(Shipment.status == status_filter)
-    if customer_id is not None:
-        statement = statement.where(Shipment.customer_id == customer_id)
     if destination is not None:
         statement = statement.where(Shipment.destination == destination)
 
@@ -162,10 +170,16 @@ async def compare_carrier_rates(
     summary="Read one shipment",
     responses={404: {"description": "No shipment carries that reference."}},
 )
-async def get_shipment(shipment_id: ShipmentId, session: SessionDep) -> Shipment:
+async def get_shipment(
+    shipment_id: ShipmentId,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Shipment:
     # Eager loaded, because serialising the nested customer and packages would
     # otherwise touch unloaded relationships and raise MissingGreenlet.
-    return await require_shipment(session, shipment_id, with_relations=True)
+    return await require_shipment(
+        session, shipment_id, owner=current_user, with_relations=True
+    )
 
 
 @router.post(
@@ -178,13 +192,16 @@ async def get_shipment(shipment_id: ShipmentId, session: SessionDep) -> Shipment
         422: {"description": "The parcel breaches a weight, size or content rule."}
     },
 )
-async def create_shipment(body: ShipmentCreate, session: SessionDep) -> Shipment:
-    # Checked explicitly so an unknown customer produces a clear 404 rather than
-    # a foreign key violation surfacing as a 500.
-    await require_user(session, body.customer_id)
-
+async def create_shipment(
+    body: ShipmentCreate,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Shipment:
+    # The owner comes from the token, never from the request body. When the
+    # client supplied customer_id, anyone could book a shipment in somebody
+    # else's name simply by typing their id.
     fields = body.model_dump(exclude={"packages"})
-    shipment = Shipment(**fields)
+    shipment = Shipment(**fields, customer_id=current_user.id)
     # Appending to the relationship rather than setting shipment_id by hand:
     # SQLAlchemy works out the insert order and fills in the foreign key once
     # the parent has an id, all within one transaction.
@@ -207,12 +224,14 @@ async def replace_shipment(
     shipment_id: ShipmentId,
     body: ShipmentCreate,
     session: SessionDep,
+    current_user: CurrentUser,
 ) -> Shipment:
     # with_relations is required here: replacing the packages list compares it
     # against the current one, and comparing against an unloaded collection
     # would trigger a lazy load.
-    shipment = await require_shipment(session, shipment_id, with_relations=True)
-    await require_user(session, body.customer_id)
+    shipment = await require_shipment(
+        session, shipment_id, owner=current_user, with_relations=True
+    )
 
     for field, value in body.model_dump(exclude={"packages"}).items():
         setattr(shipment, field, value)
@@ -223,7 +242,9 @@ async def replace_shipment(
 
     session.add(shipment)
     await session.commit()
-    return await require_shipment(session, shipment_id, with_relations=True)
+    return await require_shipment(
+        session, shipment_id, owner=current_user, with_relations=True
+    )
 
 
 @router.patch(
@@ -235,8 +256,9 @@ async def update_shipment(
     shipment_id: ShipmentId,
     body: ShipmentUpdate,
     session: SessionDep,
+    current_user: CurrentUser,
 ) -> Shipment:
-    shipment = await require_shipment(session, shipment_id)
+    shipment = await require_shipment(session, shipment_id, owner=current_user)
     # exclude_unset keeps fields the client never mentioned out of the update,
     # which is the difference between "leave it alone" and "set it to null".
     for field, value in body.model_dump(exclude_unset=True).items():
@@ -256,8 +278,9 @@ async def update_shipment(
 async def list_tracking_events(
     shipment_id: ShipmentId,
     session: SessionDep,
+    current_user: CurrentUser,
 ) -> list[TrackingEvent]:
-    await require_shipment(session, shipment_id)
+    await require_shipment(session, shipment_id, owner=current_user)
     statement = (
         select(TrackingEvent)
         .where(TrackingEvent.shipment_id == shipment_id)
@@ -280,8 +303,9 @@ async def add_tracking_event(
     shipment_id: ShipmentId,
     body: TrackingEventCreate,
     session: SessionDep,
+    current_user: CurrentUser,
 ) -> TrackingEvent:
-    shipment = await require_shipment(session, shipment_id)
+    shipment = await require_shipment(session, shipment_id, owner=current_user)
 
     event = TrackingEvent(shipment_id=shipment_id, **body.model_dump())
     session.add(event)
@@ -302,8 +326,14 @@ async def add_tracking_event(
     summary="List a shipment's routing stops",
     responses={404: {"description": "No shipment carries that reference."}},
 )
-async def list_stops(shipment_id: ShipmentId, session: SessionDep) -> list[Warehouse]:
-    shipment = await require_shipment(session, shipment_id, with_relations=True)
+async def list_stops(
+    shipment_id: ShipmentId,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> list[Warehouse]:
+    shipment = await require_shipment(
+        session, shipment_id, owner=current_user, with_relations=True
+    )
     return shipment.stops
 
 
@@ -317,8 +347,11 @@ async def attach_stop(
     shipment_id: ShipmentId,
     warehouse_id: WarehouseId,
     session: SessionDep,
+    current_user: CurrentUser,
 ) -> list[Warehouse]:
-    shipment = await require_shipment(session, shipment_id, with_relations=True)
+    shipment = await require_shipment(
+        session, shipment_id, owner=current_user, with_relations=True
+    )
     warehouse = await require_warehouse(session, warehouse_id)
 
     # PUT, so attaching twice is idempotent. Appending unconditionally would
@@ -328,7 +361,9 @@ async def attach_stop(
         session.add(shipment)
         await session.commit()
 
-    refreshed = await require_shipment(session, shipment_id, with_relations=True)
+    refreshed = await require_shipment(
+        session, shipment_id, owner=current_user, with_relations=True
+    )
     return refreshed.stops
 
 
@@ -342,8 +377,11 @@ async def detach_stop(
     shipment_id: ShipmentId,
     warehouse_id: WarehouseId,
     session: SessionDep,
+    current_user: CurrentUser,
 ) -> list[Warehouse]:
-    shipment = await require_shipment(session, shipment_id, with_relations=True)
+    shipment = await require_shipment(
+        session, shipment_id, owner=current_user, with_relations=True
+    )
     warehouse = await require_warehouse(session, warehouse_id)
 
     # Removing from the list deletes the link row only. The warehouse itself is
@@ -353,7 +391,9 @@ async def detach_stop(
         session.add(shipment)
         await session.commit()
 
-    refreshed = await require_shipment(session, shipment_id, with_relations=True)
+    refreshed = await require_shipment(
+        session, shipment_id, owner=current_user, with_relations=True
+    )
     return refreshed.stops
 
 
@@ -363,8 +403,14 @@ async def detach_stop(
     summary="List a shipment's handling labels",
     responses={404: {"description": "No shipment carries that reference."}},
 )
-async def list_shipment_tags(shipment_id: ShipmentId, session: SessionDep) -> list[Tag]:
-    shipment = await require_shipment(session, shipment_id, with_relations=True)
+async def list_shipment_tags(
+    shipment_id: ShipmentId,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> list[Tag]:
+    shipment = await require_shipment(
+        session, shipment_id, owner=current_user, with_relations=True
+    )
     return shipment.tags
 
 
@@ -378,8 +424,11 @@ async def attach_tag(
     shipment_id: ShipmentId,
     tag_id: TagId,
     session: SessionDep,
+    current_user: CurrentUser,
 ) -> list[Tag]:
-    shipment = await require_shipment(session, shipment_id, with_relations=True)
+    shipment = await require_shipment(
+        session, shipment_id, owner=current_user, with_relations=True
+    )
     tag = await require_tag(session, tag_id)
 
     if tag not in shipment.tags:
@@ -387,7 +436,9 @@ async def attach_tag(
         session.add(shipment)
         await session.commit()
 
-    refreshed = await require_shipment(session, shipment_id, with_relations=True)
+    refreshed = await require_shipment(
+        session, shipment_id, owner=current_user, with_relations=True
+    )
     return refreshed.tags
 
 
@@ -401,8 +452,11 @@ async def detach_tag(
     shipment_id: ShipmentId,
     tag_id: TagId,
     session: SessionDep,
+    current_user: CurrentUser,
 ) -> list[Tag]:
-    shipment = await require_shipment(session, shipment_id, with_relations=True)
+    shipment = await require_shipment(
+        session, shipment_id, owner=current_user, with_relations=True
+    )
     tag = await require_tag(session, tag_id)
 
     if tag in shipment.tags:
@@ -410,7 +464,9 @@ async def detach_tag(
         session.add(shipment)
         await session.commit()
 
-    refreshed = await require_shipment(session, shipment_id, with_relations=True)
+    refreshed = await require_shipment(
+        session, shipment_id, owner=current_user, with_relations=True
+    )
     return refreshed.tags
 
 
@@ -419,7 +475,11 @@ async def detach_tag(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Cancel a shipment",
 )
-async def delete_shipment(shipment_id: ShipmentId, session: SessionDep) -> None:
-    shipment = await require_shipment(session, shipment_id)
+async def delete_shipment(
+    shipment_id: ShipmentId,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> None:
+    shipment = await require_shipment(session, shipment_id, owner=current_user)
     await session.delete(shipment)
     await session.commit()

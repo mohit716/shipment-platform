@@ -1,5 +1,7 @@
 import bcrypt
 
+from app.core.config import settings
+
 # bcrypt only reads the first 72 bytes of a password. Anything beyond that is
 # silently ignored by the algorithm, so the schema caps the field rather than
 # letting callers believe a 200 character passphrase is fully checked.
@@ -13,15 +15,17 @@ def hash_password(password: str) -> str:
     with the same password get different hashes and why a stolen hash cannot be
     looked up in a precomputed table.
     """
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    salt = bcrypt.gensalt(rounds=settings.bcrypt_rounds)
+    return bcrypt.hashpw(password.encode(), salt).decode()
 
 
 def verify_password(password: str, hashed: str) -> bool:
     """Check a plaintext password against a stored hash.
 
     The salt and cost factor are embedded in the hash itself, so nothing else
-    has to be stored alongside it. checkpw compares in constant time, so the
-    duration of a failed login does not leak how much of the hash matched.
+    has to be stored alongside it, and lowering the cost factor later does not
+    invalidate hashes made at the old one. checkpw compares in constant time,
+    so the duration of a failed login does not leak how much of it matched.
     """
     try:
         return bcrypt.checkpw(password.encode(), hashed.encode())

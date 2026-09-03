@@ -7,8 +7,21 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.config import settings
 from app.db.session import get_session
 from app.main import app
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _cheap_password_hashing() -> None:
+    """Hash at bcrypt's minimum cost for the whole suite.
+
+    Production wants the work factor high enough to make offline cracking
+    expensive. A test suite that registers hundreds of throwaway accounts pays
+    that cost hundreds of times for no security benefit; at the default this
+    suite spent about three minutes hashing.
+    """
+    settings.bcrypt_rounds = 4
 
 
 @pytest.fixture
@@ -60,3 +73,49 @@ async def client_fixture(tmp_path: Path) -> AsyncIterator[AsyncClient]:
 
     app.dependency_overrides.clear()
     await engine.dispose()
+
+
+@pytest.fixture(name="customer")
+async def customer_fixture(client: AsyncClient) -> dict:
+    """A registered account, returned as the API represents it."""
+    response = await client.post(
+        "/users",
+        json={
+            "email": "ada@example.com",
+            "full_name": "Ada Lovelace",
+            "password": "correct-horse",
+        },
+    )
+    return response.json()
+
+
+@pytest.fixture(name="auth_client")
+async def auth_client_fixture(client: AsyncClient, customer: dict) -> AsyncClient:
+    """The same client, logged in as the customer fixture.
+
+    Setting the header once here rather than per request keeps the tests about
+    the behaviour under test instead of about authentication plumbing.
+    """
+    response = await client.post(
+        "/auth/token",
+        data={"username": "ada@example.com", "password": "correct-horse"},
+    )
+    token = response.json()["access_token"]
+    client.headers["Authorization"] = f"Bearer {token}"
+    return client
+
+
+async def login_as(client: AsyncClient, email: str, full_name: str) -> dict[str, str]:
+    """Register a second account and return its Authorization header.
+
+    Used by the ownership tests, which need two callers to prove one cannot see
+    the other's shipments.
+    """
+    await client.post(
+        "/users",
+        json={"email": email, "full_name": full_name, "password": "correct-horse"},
+    )
+    response = await client.post(
+        "/auth/token", data={"username": email, "password": "correct-horse"}
+    )
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}

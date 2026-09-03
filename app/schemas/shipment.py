@@ -64,9 +64,13 @@ class ShipmentBase(BaseModel):
 
 
 class ShipmentCreate(ShipmentBase):
-    """What a client may send when booking. Note the absence of id."""
+    """What a client may send when booking.
 
-    customer_id: int = Field(ge=1, description="The customer booking the shipment.")
+    Note the absence of both id and customer_id. The server owns the reference,
+    and the owner is taken from the access token, so neither is something a
+    client is allowed to state.
+    """
+
     status: ShipmentStatus = Field(
         default=ShipmentStatus.placed,
         description="Current lifecycle state.",
@@ -80,13 +84,16 @@ class ShipmentCreate(ShipmentBase):
     )
 
     model_config = {
+        # Reject unknown keys rather than dropping them. A client still sending
+        # customer_id now gets a 422 saying it is not accepted, instead of
+        # having it silently ignored and believing it booked for someone else.
+        "extra": "forbid",
         "json_schema_extra": {
             "examples": [
                 {
                     "content": "ceramic dinnerware, double boxed",
                     "weight_kg": 2.4,
                     "destination": 11001,
-                    "customer_id": 1,
                     "packages": [
                         {
                             "description": "outer carton",

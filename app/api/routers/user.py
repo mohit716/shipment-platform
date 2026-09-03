@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from sqlalchemy.orm import selectinload
 
+from app.api.deps import CurrentUser
 from app.core.security import hash_password
 from app.db.session import SessionDep
 from app.models.shipment import Shipment
@@ -86,7 +87,20 @@ async def get_user(user_id: UserId, session: SessionDep) -> User:
     summary="List a customer's shipments",
     responses={404: {"description": "No customer carries that reference."}},
 )
-async def list_user_shipments(user_id: UserId, session: SessionDep) -> list[Shipment]:
+async def list_user_shipments(
+    user_id: UserId,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> list[Shipment]:
+    # Asking for somebody else's shipments reads as 404, the same answer a
+    # nonexistent customer gets, so the route cannot be used to discover which
+    # ids are real.
+    if user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Customer {user_id} does not exist.",
+        )
+
     # Reading user.shipments would lazily emit a query on attribute access, and
     # a lazy load in async code raises MissingGreenlet. selectinload fetches the
     # children up front as part of this statement instead.

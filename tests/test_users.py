@@ -1,6 +1,8 @@
 import pytest
 from httpx import AsyncClient
 
+from tests.conftest import login_as
+
 pytestmark = pytest.mark.anyio
 
 VALID_USER = {
@@ -36,33 +38,30 @@ async def test_reading_a_missing_customer_returns_404(client: AsyncClient) -> No
     assert (await client.get("/users/4242")).status_code == 404
 
 
+BOOKING = {"content": "ceramic dinnerware", "weight_kg": 2.4, "destination": 11001}
+
+
 async def test_customer_shipments_traverse_the_relationship(
-    client: AsyncClient,
+    auth_client: AsyncClient, customer: dict
 ) -> None:
-    customer = (await client.post("/users", json=VALID_USER)).json()
-    other = (
-        await client.post(
-            "/users",
-            json={
-                "email": "grace@example.com",
-                "full_name": "Grace Hopper",
-                "password": "correct-horse",
-            },
-        )
-    ).json()
+    other = await login_as(auth_client, "grace@example.com", "Grace Hopper")
+    mine = await auth_client.post("/shipments", json=BOOKING)
+    await auth_client.post("/shipments", json=BOOKING, headers=other)
 
-    booking = {"content": "ceramic dinnerware", "weight_kg": 2.4, "destination": 11001}
-    mine = await client.post(
-        "/shipments", json={**booking, "customer_id": customer["id"]}
-    )
-    await client.post("/shipments", json={**booking, "customer_id": other["id"]})
-
-    response = await client.get(f"/users/{customer['id']}/shipments")
+    response = await auth_client.get(f"/users/{customer['id']}/shipments")
     assert response.status_code == 200
     assert [row["id"] for row in response.json()] == [mine.json()["id"]]
 
 
-async def test_shipments_for_a_missing_customer_returns_404(
-    client: AsyncClient,
+async def test_reading_another_customers_shipments_is_404(
+    auth_client: AsyncClient,
 ) -> None:
-    assert (await client.get("/users/4242/shipments")).status_code == 404
+    other = await login_as(auth_client, "grace@example.com", "Grace Hopper")
+    response = await auth_client.get("/users/1/shipments", headers=other)
+    assert response.status_code == 404
+
+
+async def test_shipments_for_a_missing_customer_returns_404(
+    auth_client: AsyncClient,
+) -> None:
+    assert (await auth_client.get("/users/4242/shipments")).status_code == 404
