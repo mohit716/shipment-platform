@@ -1,4 +1,9 @@
-from fastapi.testclient import TestClient
+import pytest
+from httpx import AsyncClient
+
+# Applies the anyio marker to every test in the module, so each one no longer
+# needs its own decorator.
+pytestmark = pytest.mark.anyio
 
 VALID_BOOKING = {
     "content": "ceramic dinnerware",
@@ -7,45 +12,49 @@ VALID_BOOKING = {
 }
 
 
-def book(client: TestClient, **overrides: object) -> dict:
-    response = client.post("/shipments", json={**VALID_BOOKING, **overrides})
+async def book(client: AsyncClient, **overrides: object) -> dict:
+    response = await client.post("/shipments", json={**VALID_BOOKING, **overrides})
     assert response.status_code == 201
     return response.json()
 
 
-def test_health_reports_ok(client: TestClient) -> None:
-    response = client.get("/health")
+async def test_health_reports_ok(client: AsyncClient) -> None:
+    response = await client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
 
-def test_booking_assigns_an_id_and_defaults_to_placed(client: TestClient) -> None:
-    created = book(client)
+async def test_booking_assigns_an_id_and_defaults_to_placed(
+    client: AsyncClient,
+) -> None:
+    created = await book(client)
     assert created["id"] >= 1
     assert created["status"] == "placed"
 
 
-def test_booking_normalises_whitespace_in_content(client: TestClient) -> None:
-    created = book(client, content="  ceramic   dinnerware  ")
+async def test_booking_normalises_whitespace_in_content(client: AsyncClient) -> None:
+    created = await book(client, content="  ceramic   dinnerware  ")
     assert created["content"] == "ceramic dinnerware"
 
 
-def test_listing_starts_empty_then_reflects_bookings(client: TestClient) -> None:
-    assert client.get("/shipments").json() == []
-    book(client)
-    book(client, content="laptop parts")
-    assert len(client.get("/shipments").json()) == 2
+async def test_listing_starts_empty_then_reflects_bookings(
+    client: AsyncClient,
+) -> None:
+    assert (await client.get("/shipments")).json() == []
+    await book(client)
+    await book(client, content="laptop parts")
+    assert len((await client.get("/shipments")).json()) == 2
 
 
-def test_reading_a_missing_shipment_returns_404(client: TestClient) -> None:
-    response = client.get("/shipments/4242")
+async def test_reading_a_missing_shipment_returns_404(client: AsyncClient) -> None:
+    response = await client.get("/shipments/4242")
     assert response.status_code == 404
     assert "does not exist" in response.json()["detail"]
 
 
-def test_patch_changes_only_the_supplied_field(client: TestClient) -> None:
-    created = book(client)
-    response = client.patch(
+async def test_patch_changes_only_the_supplied_field(client: AsyncClient) -> None:
+    created = await book(client)
+    response = await client.patch(
         f"/shipments/{created['id']}", json={"status": "in_transit"}
     )
     assert response.status_code == 200
@@ -55,45 +64,57 @@ def test_patch_changes_only_the_supplied_field(client: TestClient) -> None:
     assert updated["weight_kg"] == created["weight_kg"]
 
 
-def test_put_replaces_and_resets_omitted_fields(client: TestClient) -> None:
-    created = book(client, status="in_transit")
-    response = client.put(f"/shipments/{created['id']}", json=VALID_BOOKING)
+async def test_put_replaces_and_resets_omitted_fields(client: AsyncClient) -> None:
+    created = await book(client, status="in_transit")
+    response = await client.put(f"/shipments/{created['id']}", json=VALID_BOOKING)
     # status was omitted from the body, so it falls back to the schema default.
     assert response.json()["status"] == "placed"
 
 
-def test_delete_removes_the_shipment(client: TestClient) -> None:
-    created = book(client)
-    assert client.delete(f"/shipments/{created['id']}").status_code == 204
-    assert client.get(f"/shipments/{created['id']}").status_code == 404
+async def test_delete_removes_the_shipment(client: AsyncClient) -> None:
+    created = await book(client)
+    assert (await client.delete(f"/shipments/{created['id']}")).status_code == 204
+    assert (await client.get(f"/shipments/{created['id']}")).status_code == 404
 
 
-def test_overweight_parcel_is_rejected(client: TestClient) -> None:
-    response = client.post("/shipments", json={**VALID_BOOKING, "weight_kg": 90})
+async def test_overweight_parcel_is_rejected(client: AsyncClient) -> None:
+    response = await client.post("/shipments", json={**VALID_BOOKING, "weight_kg": 90})
     assert response.status_code == 422
 
 
-def test_prohibited_content_is_rejected(client: TestClient) -> None:
-    response = client.post(
+async def test_prohibited_content_is_rejected(client: AsyncClient) -> None:
+    response = await client.post(
         "/shipments", json={**VALID_BOOKING, "content": "firearm parts"}
     )
     assert response.status_code == 422
 
 
-def test_unknown_status_is_rejected(client: TestClient) -> None:
-    response = client.post("/shipments", json={**VALID_BOOKING, "status": "delivrd"})
+async def test_unknown_status_is_rejected(client: AsyncClient) -> None:
+    response = await client.post(
+        "/shipments", json={**VALID_BOOKING, "status": "delivrd"}
+    )
     assert response.status_code == 422
 
 
-def test_status_filter_narrows_the_list(client: TestClient) -> None:
-    book(client)
-    moving = book(client, status="in_transit")
-    results = client.get("/shipments", params={"status": "in_transit"}).json()
-    assert [row["id"] for row in results] == [moving["id"]]
+async def test_status_filter_narrows_the_list(client: AsyncClient) -> None:
+    await book(client)
+    moving = await book(client, status="in_transit")
+    response = await client.get("/shipments", params={"status": "in_transit"})
+    assert [row["id"] for row in response.json()] == [moving["id"]]
 
 
-def test_limit_caps_the_page_size(client: TestClient) -> None:
+async def test_limit_caps_the_page_size(client: AsyncClient) -> None:
     for _ in range(3):
-        book(client)
-    assert len(client.get("/shipments", params={"limit": 2}).json()) == 2
-    assert client.get("/shipments", params={"limit": 500}).status_code == 422
+        await book(client)
+    assert len((await client.get("/shipments", params={"limit": 2})).json()) == 2
+    assert (await client.get("/shipments", params={"limit": 500})).status_code == 422
+
+
+async def test_carrier_quotes_run_concurrently(client: AsyncClient) -> None:
+    response = await client.get("/shipments/quotes", params={"weight_kg": 3})
+    assert response.status_code == 200
+    payload = response.json()
+    # The whole point of gather: elapsed time tracks the slowest call, not the sum.
+    assert payload["elapsed_seconds"] < payload["sequential_would_take"]
+    prices = [quote["price"] for quote in payload["quotes"]]
+    assert prices == sorted(prices)

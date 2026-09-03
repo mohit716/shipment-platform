@@ -1,9 +1,8 @@
-import asyncio
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -12,13 +11,23 @@ from app.db.session import get_session
 from app.main import app
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    """Run async tests on asyncio only.
+
+    anyio would otherwise parameterise every test across asyncio and trio,
+    doubling the suite for no benefit here.
+    """
+    return "asyncio"
+
+
 @pytest.fixture(name="client")
-def client_fixture(tmp_path: Path) -> Iterator[TestClient]:
+async def client_fixture(tmp_path: Path) -> AsyncIterator[AsyncClient]:
     """A client backed by a throwaway database, rebuilt for every test.
 
-    A file under tmp_path rather than an in-memory database: the app runs on its
-    own event loop under TestClient, and an in-memory SQLite connection cannot be
-    shared across loops. A file can be opened by whichever loop needs it.
+    A file under tmp_path rather than an in-memory database: an in-memory SQLite
+    connection belongs to whichever connection created it, and sharing one
+    between the test and the application is more trouble than a temporary file.
     """
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'test.db').as_posix()}"
     engine = create_async_engine(
@@ -31,11 +40,8 @@ def client_fixture(tmp_path: Path) -> Iterator[TestClient]:
         expire_on_commit=False,
     )
 
-    async def create_tables() -> None:
-        async with engine.begin() as connection:
-            await connection.run_sync(SQLModel.metadata.create_all)
-
-    asyncio.run(create_tables())
+    async with engine.begin() as connection:
+        await connection.run_sync(SQLModel.metadata.create_all)
 
     async def session_override() -> AsyncIterator[AsyncSession]:
         async with session_factory() as session:
@@ -45,7 +51,12 @@ def client_fixture(tmp_path: Path) -> Iterator[TestClient]:
     # database. This is the payoff for injecting the session in commit 25: no
     # route needs to know it is being tested.
     app.dependency_overrides[get_session] = session_override
-    with TestClient(app) as client:
+
+    # ASGITransport calls the application in-process. There is no socket, no
+    # port and no server, so the suite stays fast and needs nothing running.
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
     app.dependency_overrides.clear()
-    asyncio.run(engine.dispose())
+    await engine.dispose()
