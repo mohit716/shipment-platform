@@ -5,7 +5,6 @@ from fastapi import FastAPI, status
 
 from app.api.routers import shipment
 from app.core.config import settings
-from app.db.session import create_db_and_tables
 
 DESCRIPTION = """
 FleetLine moves parcels from a customer's door to a delivery address, through
@@ -33,8 +32,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     This replaced the older @app.on_event("startup") decorators, which are
     deprecated. Everything before yield happens before the first request is
     served; everything after runs during a clean shutdown.
+
+    Creating tables no longer happens here. The schema is owned by Alembic, so
+    starting the app can never silently change the database: run
+    `alembic upgrade head` instead.
     """
-    await create_db_and_tables()
     yield
 
 
