@@ -46,3 +46,4 @@ class UserRead(UserBase):
     # Readable but not writable: UserCreate has no role field, so registration
     # cannot ask for one.
     role: UserRole
+    is_verified: bool

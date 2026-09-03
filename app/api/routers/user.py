@@ -1,19 +1,22 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Path, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentStaff, CurrentUser
+from app.api.deps import CurrentStaff, CurrentUser, NotifierDep
+from app.core.config import settings
 from app.core.security import hash_password
+from app.core.tokens import TokenPurpose, create_token
 from app.db.session import SessionDep
 from app.models.shipment import Shipment
 from app.models.user import User
 from app.schemas.shipment import ShipmentRead
 from app.schemas.user import UserCreate, UserRead, UserRole
+from app.services.notifications import Notification
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -38,7 +41,12 @@ async def require_user(session: AsyncSession, user_id: int) -> User:
     summary="Register a customer",
     responses={409: {"description": "That email address is already registered."}},
 )
-async def create_user(body: UserCreate, session: SessionDep) -> User:
+async def create_user(
+    body: UserCreate,
+    session: SessionDep,
+    background: BackgroundTasks,
+    notifier: NotifierDep,
+) -> User:
     # The plaintext password exists only inside this function. It is hashed
     # before the row is built, so it never reaches the model, the session, the
     # database, or a log line that dumps the object.
@@ -57,6 +65,28 @@ async def create_user(body: UserCreate, session: SessionDep) -> User:
             detail=f"{body.email} is already registered.",
         ) from None
     await session.refresh(user)
+
+    # Short lived compared with an access token: a verification link sits in an
+    # inbox indefinitely, so the window in which a leaked one is useful should
+    # be small.
+    token = create_token(
+        str(user.id),
+        TokenPurpose.verify_email,
+        expires_minutes=settings.verification_token_expire_minutes,
+    )
+    background.add_task(
+        notifier.send,
+        Notification(
+            channel="email",
+            recipient=user.email,
+            subject="Confirm your FleetLine address",
+            body=(
+                f"Hello {user.full_name},\n\n"
+                f"Confirm your address by opening:\n"
+                f"{settings.frontend_url}/verify?token={token}\n"
+            ),
+        ),
+    )
     return user
 
 

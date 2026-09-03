@@ -11,3 +11,9 @@ class Token(BaseModel):
 
     access_token: str
     token_type: str = "bearer"
+
+
+class VerificationRequest(BaseModel):
+    """The token lifted out of a verification link."""
+
+    token: str

@@ -57,6 +57,14 @@ class Settings(BaseSettings):
     smtp_username: str = ""
     smtp_password: str = ""
 
+    # Where emailed links point. The API does not serve the verification page;
+    # the dashboard does, and it posts the token back here.
+    frontend_url: str = "http://localhost:5173"
+
+    # Deliberately short. A verification link sits in an inbox indefinitely, so
+    # the window in which a leaked one is useful should be small.
+    verification_token_expire_minutes: int = 60
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -36,6 +36,10 @@ class User(SQLModel, table=True):
     # can choose is not a permission boundary at all.
     role: UserRole = Field(default=UserRole.customer, index=True)
 
+    # Proves the address reaches the person who claimed it. Registration is
+    # still allowed without it; what it gates is decided per route.
+    is_verified: bool = Field(default=False)
+
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),
