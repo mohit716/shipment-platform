@@ -94,3 +94,13 @@ def update_shipment(shipment_id: int, body: dict[str, Any]) -> dict[str, Any]:
     # a status update from a warehouse scanner actually needs.
     shipments[shipment_id].update(body)
     return shipments[shipment_id]
+
+
+@app.delete(
+    "/shipments/{shipment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["shipments"],
+    summary="Cancel a shipment",
+)
+def delete_shipment(shipment_id: int) -> None:
+    shipments.pop(shipment_id, None)
