@@ -1,6 +1,6 @@
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ShipmentStatus(str, Enum):
@@ -23,12 +23,27 @@ class ShipmentStatus(str, Enum):
 class Shipment(BaseModel):
     """A shipment as it travels over the wire.
 
-    Declaring the fields with types is enough for Pydantic to parse, validate and
-    serialise them. A body of {"weight_kg": "heavy"} is now rejected with 422
-    instead of being stored.
+    Field carries the business rules: a carrier that cannot lift more than 25 kg
+    and a destination that must be a five digit postcode are facts about the
+    domain, and stating them here means no handler has to re-check them.
     """
 
-    content: str
-    weight_kg: float
-    destination: int
-    status: ShipmentStatus
+    content: str = Field(
+        min_length=3,
+        max_length=120,
+        description="What is inside the parcel.",
+    )
+    weight_kg: float = Field(
+        gt=0,
+        le=25,
+        description="Billable weight. Anything above 25 kg is freight, not parcel.",
+    )
+    destination: int = Field(
+        ge=10000,
+        le=99999,
+        description="Five digit destination postcode.",
+    )
+    status: ShipmentStatus = Field(
+        default=ShipmentStatus.placed,
+        description="Current lifecycle state.",
+    )
