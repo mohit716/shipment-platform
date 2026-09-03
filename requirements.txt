@@ -9,5 +9,8 @@
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
 sqlmodel==0.0.42
-aiosqlite==0.22.1
+asyncpg==0.31.0
 greenlet==3.5.5
+
+# SQLite driver, kept for the test suite which runs against a temporary file.
+aiosqlite==0.22.1

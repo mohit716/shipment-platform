@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
 
 from app.schemas.shipment import ShipmentStatus
@@ -27,6 +28,11 @@ class Shipment(SQLModel, table=True):
 
     # default_factory, not default: passing datetime.now(...) directly would
     # evaluate once at import and stamp every row with the same time.
+    #
+    # sa_column forces TIMESTAMP WITH TIME ZONE. The inferred type is timezone
+    # naive, and asyncpg refuses to write an aware datetime into a naive column.
+    # SQLite accepted it silently, so this only surfaced on PostgreSQL.
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
     )

@@ -9,18 +9,18 @@ from sqlmodel import SQLModel
 # only this one keeps .exec(), which returns typed rows for a select(Model).
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-# SQLite keeps the first database commits dependency free: the whole database is
-# one file next to the code. PostgreSQL replaces this in phase 5, and the only
-# line that has to change is the URL. aiosqlite is the driver that lets the
-# async engine talk to it without blocking the event loop.
-DATABASE_URL = "sqlite+aiosqlite:///./fleetline.db"
+# PostgreSQL, served by the db service in docker-compose.yml. asyncpg is the
+# async driver; psycopg2 would block the event loop on every query. Port 5433
+# because 5432 may already belong to a PostgreSQL installed on the host.
+DATABASE_URL = "postgresql+asyncpg://fleetline:fleetline@localhost:5433/fleetline"
 
-# check_same_thread is a SQLite-only guard that forbids using one connection from
-# more than one thread; every other database driver ignores this argument.
+# pool_pre_ping issues a cheap SELECT 1 before handing out a pooled connection.
+# Without it, connections dropped by a restarted database or an idle timeout are
+# only discovered when a real query fails.
 engine = create_async_engine(
     DATABASE_URL,
     echo=True,
-    connect_args={"check_same_thread": False},
+    pool_pre_ping=True,
 )
 
 # expire_on_commit=False is close to mandatory in async code. The default expires
