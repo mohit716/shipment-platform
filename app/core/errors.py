@@ -29,6 +29,33 @@ def error_body(message: str, *, details: list | None = None) -> dict:
     return body
 
 
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Turn an unexpected exception into a 500 without leaking internals.
+
+    Logged with the traceback and the request id, so the log has everything and
+    the response has nothing. An unhandled error's message can name a table, a
+    file path or a query, and none of that belongs in a reply to whoever
+    triggered it.
+
+    Defined at module level rather than nested so a test can call it without
+    going through the ASGI stack. httpx's ASGITransport re-raises unhandled
+    exceptions by default, which is useful for spotting bugs and useless for
+    asserting on the 500 body.
+    """
+    logger.exception("unhandled error on %s %s", request.method, request.url.path)
+
+    message = "Something went wrong on our side."
+    if settings.debug:
+        # In development the opposite is true: hiding the error means
+        # switching to the terminal to find out what broke.
+        message = f"{type(exc).__name__}: {exc}"
+
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=error_body(message),
+    )
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(
@@ -61,23 +88,4 @@ def register_exception_handlers(app: FastAPI) -> None:
             content=error_body("The request did not pass validation.", details=details),
         )
 
-    @app.exception_handler(Exception)
-    async def unhandled_exception_handler(
-        request: Request, exc: Exception
-    ) -> JSONResponse:
-        # Logged with the traceback and the request id, so the log has
-        # everything and the response has nothing. An unhandled error's message
-        # can name a table, a file path or a query, and none of that belongs in
-        # a reply to whoever triggered it.
-        logger.exception("unhandled error on %s %s", request.method, request.url.path)
-
-        message = "Something went wrong on our side."
-        if settings.debug:
-            # In development the opposite is true: hiding the error means
-            # switching to the terminal to find out what broke.
-            message = f"{type(exc).__name__}: {exc}"
-
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=error_body(message),
-        )
+    app.add_exception_handler(Exception, unhandled_exception_handler)

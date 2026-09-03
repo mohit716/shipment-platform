@@ -49,3 +49,50 @@ async def test_a_401_keeps_its_www_authenticate_header(client: AsyncClient) -> N
     assert response.status_code == 401
     # Rewriting the body must not drop the headers the exception carried.
     assert response.headers["www-authenticate"] == "Bearer"
+
+
+def _fake_request():
+    from starlette.requests import Request
+
+    return Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/boom",
+            "raw_path": b"/boom",
+            "query_string": b"",
+            "headers": [],
+            "client": ("test", 123),
+            "server": ("test", 80),
+        }
+    )
+
+
+async def test_unhandled_errors_hide_internals_when_debug_is_off(
+    monkeypatch,
+) -> None:
+    from app.core.config import settings
+    from app.core.errors import unhandled_exception_handler
+
+    monkeypatch.setattr(settings, "debug", False)
+    response = await unhandled_exception_handler(
+        _fake_request(), RuntimeError("SELECT * FROM users")
+    )
+    body = response.body.decode()
+    assert response.status_code == 500
+    assert "Something went wrong on our side." in body
+    assert "users" not in body
+
+
+async def test_unhandled_errors_surface_in_debug(monkeypatch) -> None:
+    from app.core.config import settings
+    from app.core.errors import unhandled_exception_handler
+
+    monkeypatch.setattr(settings, "debug", True)
+    response = await unhandled_exception_handler(
+        _fake_request(), RuntimeError("SELECT * FROM users")
+    )
+    assert b"RuntimeError" in response.body
+    assert b"users" in response.body
