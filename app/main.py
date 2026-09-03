@@ -82,3 +82,15 @@ def replace_shipment(shipment_id: int, body: dict[str, Any]) -> dict[str, Any]:
     # so any field the client omits is dropped.
     shipments[shipment_id] = {"id": shipment_id, **body}
     return shipments[shipment_id]
+
+
+@app.patch(
+    "/shipments/{shipment_id}",
+    tags=["shipments"],
+    summary="Update part of a shipment",
+)
+def update_shipment(shipment_id: int, body: dict[str, Any]) -> dict[str, Any]:
+    # PATCH merges: only the keys present in the body are touched, which is what
+    # a status update from a warehouse scanner actually needs.
+    shipments[shipment_id].update(body)
+    return shipments[shipment_id]
