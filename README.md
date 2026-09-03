@@ -126,6 +126,17 @@ answers `403`, because there the caller is known and the route is not a secret.
 Roles are not settable at registration and there is no promotion endpoint;
 staff are promoted directly in the database.
 
+## Dashboard
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+http://localhost:5173 proxies API calls to port 8000. Sign in as
+`ada@example.com` / `correct-horse` after seeding.
+
 ## Project layout
 
 ```
@@ -138,10 +149,11 @@ app/
   db/            # engine and session factory
   models/        # SQLModel tables
   schemas/       # Pydantic request and response models
-  services/      # carrier rate lookups
+  services/      # carrier rate lookups, notifications
+  seed.py        # demo dataset
+  worker.py      # Celery application
 alembic/         # migrations
+frontend/        # React dashboard
 tests/           # pytest suite
 requirements.txt # pinned direct dependencies
 ```
-
-This tree grows as the project develops; see the commit history for how and why.
