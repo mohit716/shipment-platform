@@ -1,6 +1,11 @@
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Items a parcel carrier is not licensed to move. Checked against the content
+# description so the rejection happens at the edge rather than at the depot.
+PROHIBITED_CONTENT = ("explosive", "firearm", "ammunition", "livestock")
 
 
 class ShipmentStatus(str, Enum):
@@ -44,6 +49,17 @@ class ShipmentBase(BaseModel):
         description="Five digit destination postcode.",
     )
 
+    @field_validator("content")
+    @classmethod
+    def reject_prohibited_content(cls, value: str) -> str:
+        """Normalise the description and refuse goods the carrier cannot move."""
+        cleaned = " ".join(value.split())
+        lowered = cleaned.lower()
+        for banned in PROHIBITED_CONTENT:
+            if banned in lowered:
+                raise ValueError(f"{banned} cannot be shipped as a parcel")
+        return cleaned
+
 
 class ShipmentCreate(ShipmentBase):
     """What a client may send when booking. Note the absence of id."""
@@ -72,3 +88,21 @@ class ShipmentRead(ShipmentBase):
 
     id: int
     status: ShipmentStatus
+    estimated_delivery: datetime | None = Field(
+        default=None,
+        description="Derived from weight; heavier parcels move by road.",
+    )
+
+    @model_validator(mode="after")
+    def derive_estimated_delivery(self) -> "ShipmentRead":
+        """Fill in the estimate when the stored record has none.
+
+        A model validator sees the whole object, so unlike a field validator it
+        can read weight_kg while deciding a value for estimated_delivery.
+        """
+        if self.estimated_delivery is None:
+            transit_days = 2 if self.weight_kg < 5 else 4
+            self.estimated_delivery = datetime.now(timezone.utc) + timedelta(
+                days=transit_days
+            )
+        return self
