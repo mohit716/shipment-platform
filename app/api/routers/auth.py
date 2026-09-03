@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import select
 
+from app.api.deps import CurrentUser
 from app.core.security import verify_password
 from app.core.tokens import create_access_token
 from app.db.session import SessionDep
 from app.models.user import User
 from app.schemas.auth import Token
+from app.schemas.user import UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -43,3 +45,16 @@ async def login(
     # The subject is the user id, not the email. Ids do not change, so a token
     # stays valid if the account's address is later updated.
     return Token(access_token=create_access_token(str(user.id)))
+
+
+@router.get(
+    "/me",
+    response_model=UserRead,
+    summary="Read the authenticated account",
+    responses={401: {"description": "Missing, expired or invalid token."}},
+)
+async def read_me(current_user: CurrentUser) -> User:
+    # No session, no query, no path parameter. The dependency has already
+    # turned the Authorization header into a row, which is the whole point of
+    # putting that work behind a dependency rather than in each handler.
+    return current_user

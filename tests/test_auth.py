@@ -67,6 +67,64 @@ async def test_a_failed_login_advertises_the_scheme(client: AsyncClient) -> None
     assert response.headers["www-authenticate"] == "Bearer"
 
 
+async def auth_header(client: AsyncClient) -> dict[str, str]:
+    token = (await login(client)).json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def test_me_returns_the_token_holder(client: AsyncClient) -> None:
+    user = await register(client)
+    response = await client.get("/auth/me", headers=await auth_header(client))
+
+    assert response.status_code == 200
+    assert response.json()["id"] == user["id"]
+
+
+async def test_me_without_a_token_is_401(client: AsyncClient) -> None:
+    response = await client.get("/auth/me")
+    assert response.status_code == 401
+
+
+async def test_a_garbage_token_is_401_not_500(client: AsyncClient) -> None:
+    response = await client.get(
+        "/auth/me", headers={"Authorization": "Bearer not-a-jwt"}
+    )
+    assert response.status_code == 401
+
+
+async def test_a_non_numeric_subject_is_401(client: AsyncClient) -> None:
+    from app.core.tokens import create_access_token
+
+    token = create_access_token("ada@example.com")
+    response = await client.get(
+        "/auth/me", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 401
+
+
+async def test_a_token_for_a_deleted_account_is_401(client: AsyncClient) -> None:
+    from app.core.tokens import create_access_token
+
+    # A valid signature only proves the token was issued, not that the account
+    # still exists, which is why the dependency looks the row up.
+    token = create_access_token("4242")
+    response = await client.get(
+        "/auth/me", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 401
+
+
+async def test_an_expired_token_is_401(client: AsyncClient) -> None:
+    from app.core.tokens import create_access_token
+
+    user = await register(client)
+    token = create_access_token(str(user["id"]), expires_minutes=-1)
+    response = await client.get(
+        "/auth/me", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 401
+
+
 async def test_json_is_not_accepted_for_login(client: AsyncClient) -> None:
     await register(client)
     response = await client.post(
