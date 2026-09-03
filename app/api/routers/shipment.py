@@ -1,3 +1,4 @@
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
@@ -6,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.session import SessionDep
 from app.models.shipment import Shipment
+from app.services.rates import quote_all_carriers
 from app.schemas.shipment import (
     ShipmentCreate,
     ShipmentRead,
@@ -56,6 +58,29 @@ async def list_shipments(
     statement = statement.order_by(Shipment.id).offset(offset).limit(limit)
     results = await session.exec(statement)
     return list(results.all())
+
+
+@router.get(
+    "/quotes",
+    summary="Compare carrier rates",
+    response_description="Every carrier's price, cheapest first.",
+)
+async def compare_carrier_rates(
+    weight_kg: Annotated[float, Query(gt=0, le=25)],
+) -> dict[str, object]:
+    # Declared before /{shipment_id} on purpose: the parameterised route would
+    # otherwise match "quotes" first and fail validation with a 422.
+    started = time.perf_counter()
+    quotes = await quote_all_carriers(weight_kg)
+    return {
+        "weight_kg": weight_kg,
+        "elapsed_seconds": round(time.perf_counter() - started, 3),
+        "sequential_would_take": round(sum(q.latency_seconds for q in quotes), 3),
+        "quotes": [
+            {"carrier": q.carrier, "price": q.price, "latency": q.latency_seconds}
+            for q in quotes
+        ],
+    }
 
 
 @router.get(
