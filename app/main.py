@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import FastAPI, status
 
 app = FastAPI(
@@ -5,6 +7,25 @@ app = FastAPI(
     description="Shipment management platform.",
     version="0.1.0",
 )
+
+# Stand-in for a database while the HTTP layer is being built. Everything here is
+# lost when the process restarts; PostgreSQL replaces it in a later phase.
+shipments: dict[int, dict[str, Any]] = {
+    12701: {
+        "id": 12701,
+        "content": "ceramic dinnerware",
+        "weight_kg": 2.4,
+        "destination": 11001,
+        "status": "in_transit",
+    },
+    12702: {
+        "id": 12702,
+        "content": "laptop parts",
+        "weight_kg": 0.9,
+        "destination": 40015,
+        "status": "placed",
+    },
+}
 
 
 @app.get("/")
@@ -20,3 +41,8 @@ def read_root() -> dict[str, str]:
 )
 def health_check() -> dict[str, str]:
     return {"status": "ok", "version": app.version}
+
+
+@app.get("/shipments", tags=["shipments"], summary="List every shipment")
+def list_shipments() -> list[dict[str, Any]]:
+    return list(shipments.values())
