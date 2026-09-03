@@ -75,6 +75,11 @@ class Settings(BaseSettings):
 
     # Matches the redis service in docker-compose.yml. Database 0 carries the
     # queue and 1 the results, so flushing one does not destroy the other.
+    # Off by default so the project still runs with nothing but Python and a
+    # database. Turning it on sends work to a worker instead of a background
+    # task in the API process.
+    celery_enabled: bool = False
+
     celery_broker_url: str = "redis://localhost:6380/0"
     celery_result_backend: str = "redis://localhost:6380/1"
 

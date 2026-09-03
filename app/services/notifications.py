@@ -27,6 +27,21 @@ class Notification:
         default_factory=lambda: datetime.now(timezone.utc), compare=False
     )
 
+    def as_payload(self) -> dict[str, str]:
+        """The message in a form that survives the broker.
+
+        Everything crossing a queue has to be JSON, so the timestamp becomes a
+        string and is rebuilt on the other side. Serialising by hand rather than
+        registering a custom encoder keeps the contract visible: whatever is in
+        this dict is what the worker will see.
+        """
+        return {
+            "channel": self.channel,
+            "recipient": self.recipient,
+            "subject": self.subject,
+            "body": self.body,
+        }
+
 
 class Notifier(Protocol):
     """What a delivery channel must do.
@@ -129,11 +144,26 @@ class MemoryNotifier:
         self.sent.append(notification)
 
 
-def get_notifier() -> Notifier:
-    """The channel this deployment uses, chosen by configuration.
+class QueueNotifier:
+    """Hands the message to a worker instead of delivering it.
 
-    A dependency rather than a module-level singleton, so a test can override
-    it the same way it overrides the database session.
+    The API's send becomes an enqueue that returns in microseconds. Delivery,
+    including anything slow or flaky about it, happens in another process.
+    """
+
+    def send(self, notification: Notification) -> None:
+        # Imported inside the method: app.tasks imports the notification
+        # services, so importing it at module scope would be circular.
+        from app.tasks.notifications import send_notification
+
+        send_notification.delay(notification.as_payload())
+
+
+def build_notifier() -> Notifier:
+    """The delivery channel this deployment uses, chosen by configuration.
+
+    Used by the worker, which actually delivers. The API goes through
+    get_notifier instead and normally only enqueues.
     """
     email: Notifier = (
         SMTPNotifier() if settings.email_backend == "smtp" else ConsoleNotifier()
@@ -141,3 +171,16 @@ def get_notifier() -> Notifier:
     if not settings.sms_enabled:
         return email
     return CompositeNotifier(email, SMSNotifier())
+
+
+def get_notifier() -> Notifier:
+    """What the API sends through.
+
+    A dependency rather than a module-level singleton, so a test can override
+    it the same way it overrides the database session. With a worker running
+    this only enqueues; with celery_enabled off it delivers inline, so the
+    project still runs with nothing but Python and a database.
+    """
+    if settings.celery_enabled:
+        return QueueNotifier()
+    return build_notifier()
