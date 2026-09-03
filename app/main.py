@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routers import auth, shipment, tag, user, warehouse
 from app.core.config import settings
+from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import RequestContextMiddleware
 
@@ -93,6 +94,8 @@ app.add_middleware(
 # the entire response, preflights included, and sets the request id before any
 # other code can log.
 app.add_middleware(RequestContextMiddleware)
+
+register_exception_handlers(app)
 
 app.include_router(auth.router)
 app.include_router(user.router)

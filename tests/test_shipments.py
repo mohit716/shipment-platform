@@ -230,7 +230,7 @@ async def test_scanning_an_unknown_shipment_returns_404(
 async def test_reading_a_missing_shipment_returns_404(auth_client: AsyncClient) -> None:
     response = await auth_client.get("/shipments/4242")
     assert response.status_code == 404
-    assert "does not exist" in response.json()["detail"]
+    assert "does not exist" in response.json()["error"]["message"]
 
 
 async def test_patch_changes_only_the_supplied_field(auth_client: AsyncClient) -> None:

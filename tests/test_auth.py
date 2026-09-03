@@ -59,7 +59,10 @@ async def test_an_unknown_email_is_rejected_identically(client: AsyncClient) -> 
     # Same status and same message. Any difference would let an attacker
     # enumerate which addresses are registered.
     assert unknown.status_code == wrong_password.status_code == 401
-    assert unknown.json()["detail"] == wrong_password.json()["detail"]
+    assert (
+        unknown.json()["error"]["message"]
+        == wrong_password.json()["error"]["message"]
+    )
 
 
 async def test_a_failed_login_advertises_the_scheme(client: AsyncClient) -> None:

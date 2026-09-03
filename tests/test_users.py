@@ -24,7 +24,7 @@ async def test_duplicate_email_is_rejected_with_409(client: AsyncClient) -> None
     await client.post("/users", json=VALID_USER)
     response = await client.post("/users", json=VALID_USER)
     assert response.status_code == 409
-    assert "already registered" in response.json()["detail"]
+    assert "already registered" in response.json()["error"]["message"]
 
 
 async def test_malformed_email_is_rejected(client: AsyncClient) -> None:
