@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, status
 
-from app.api.routers import shipment, tag, user, warehouse
+from app.api.routers import auth, shipment, tag, user, warehouse
 from app.core.config import settings
 
 DESCRIPTION = """
@@ -15,6 +15,10 @@ the customer can see the full journey rather than only the latest position.
 """
 
 TAGS_METADATA = [
+    {
+        "name": "auth",
+        "description": "Exchange credentials for an access token.",
+    },
     {
         "name": "users",
         "description": "Customers who book shipments.",
@@ -63,6 +67,7 @@ app = FastAPI(
     license_info={"name": "MIT"},
 )
 
+app.include_router(auth.router)
 app.include_router(user.router)
 app.include_router(warehouse.router)
 app.include_router(tag.router)
