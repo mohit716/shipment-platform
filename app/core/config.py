@@ -31,6 +31,18 @@ class Settings(BaseSettings):
     # production, so it follows the environment rather than being hard coded.
     database_echo: bool = True
 
+    # Signing key for access tokens. The default is a development placeholder;
+    # phase 16 makes production refuse to start without a real one, because a
+    # known secret means anyone can mint a token for any account.
+    # At least 32 bytes: HS256 keys shorter than the hash output weaken the
+    # signature, and PyJWT warns about it.
+    secret_key: str = "dev-only-secret-change-me-in-production"
+    jwt_algorithm: str = "HS256"
+
+    # Short lived on purpose. A token cannot be revoked once issued, so the
+    # expiry is the only thing limiting the damage from a stolen one.
+    access_token_expire_minutes: int = 30
+
 
 @lru_cache
 def get_settings() -> Settings:
