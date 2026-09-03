@@ -6,10 +6,11 @@ tracking event and pushed to the customer by email and SMS.
 
 Built with FastAPI, PostgreSQL, Redis, Celery and React.
 
-> Status: in active development. The commit history is intentionally fine grained,
-> with each commit introducing a single concept.
+> Status: API, dashboard, workers and deploy docs are in place. The commit
+> history is intentionally fine grained, with each commit introducing a single
+> concept.
 
-## Planned capabilities
+## Capabilities
 
 - Shipment booking with packages, routing stops and labels such as Fragile or Perishable.
 - A delivery lifecycle: placed, picked up, in transit, at warehouse, out for delivery, delivered.
@@ -157,3 +158,26 @@ frontend/        # React dashboard
 tests/           # pytest suite
 requirements.txt # pinned direct dependencies
 ```
+
+## Docker
+
+```bash
+docker compose up --build
+docker compose exec api python -m app.seed
+```
+
+Dashboard: http://localhost:8080  
+API docs: http://localhost:8000/docs
+
+## Resume notes
+
+FleetLine is a full-stack logistics API: FastAPI + PostgreSQL + Alembic, JWT
+auth with ownership scoping, many-to-many routing, Celery/Redis notifications,
+a React dashboard, Docker Compose, and CI that checks migrations against
+Postgres.
+
+What to say in an interview: why unauthorised reads are 404 not 403; why a JWT
+carries a purpose claim; why the worker is a separate process; why production
+refuses to boot on the development secret.
+
+Deploy notes for Render and AWS: [docs/deployment.md](docs/deployment.md).
