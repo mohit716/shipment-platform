@@ -1,13 +1,16 @@
 from collections.abc import AsyncIterator
-from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlmodel import SQLModel
+from sqlalchemy import delete, text
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
-
-from sqlmodel import select
 
 from app.core.config import settings
 from app.core.ratelimit import login_limiter
@@ -30,40 +33,89 @@ def _cheap_password_hashing() -> None:
     settings.bcrypt_rounds = 4
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def anyio_backend() -> str:
     """Run async tests on asyncio only.
 
     anyio would otherwise parameterise every test across asyncio and trio,
     doubling the suite for no benefit here.
+
+    Session scoped because the engine fixture is: an async fixture cannot
+    depend on a narrower-scoped one, and pytest reports that as a ScopeMismatch
+    rather than anything about event loops.
     """
     return "asyncio"
 
 
-@pytest.fixture(name="session_factory")
-async def session_factory_fixture(tmp_path: Path) -> AsyncIterator[object]:
-    """A throwaway database, rebuilt for every test.
+@pytest.fixture(name="engine", scope="session")
+async def engine_fixture(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> AsyncIterator[AsyncEngine]:
+    """One database for the whole run, with the schema built once.
 
-    A file under tmp_path rather than an in-memory database: an in-memory SQLite
-    connection belongs to whichever connection created it, and sharing one
-    between the test and the application is more trouble than a temporary file.
+    Previously every test created its own file and ran create_all. That is
+    perfectly isolated and pays for the schema hundreds of times; isolation is
+    now a table wipe after each test instead, which is far cheaper.
 
-    Exposed as its own fixture so a test can reach the database directly, which
-    is how staff promotion is done: there is no endpoint for it.
+    A file rather than an in-memory database: an in-memory SQLite database
+    belongs to the connection that created it, and this fixture deliberately
+    hands out several connections. StaticPool keeps them all on one connection
+    so they see the same file state.
     """
-    database_url = f"sqlite+aiosqlite:///{(tmp_path / 'test.db').as_posix()}"
+    path = tmp_path_factory.mktemp("fleetline") / "test.db"
     engine = create_async_engine(
-        database_url,
+        f"sqlite+aiosqlite:///{path.as_posix()}",
         connect_args={"check_same_thread": False},
+        # One connection for the whole session, so every session in a test sees
+        # the same uncommitted transaction.
+        poolclass=StaticPool,
     )
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with engine.begin() as connection:
         await connection.run_sync(SQLModel.metadata.create_all)
 
-    yield factory
+    yield engine
 
     await engine.dispose()
+
+
+@pytest.fixture(name="session_factory")
+async def session_factory_fixture(engine: AsyncEngine) -> AsyncIterator[object]:
+    """Sessions against the shared schema, emptied after each test.
+
+    Nested-transaction rollback is the usual trick, but SQLite plus aiosqlite
+    does not honour SAVEPOINT the way PostgreSQL does: a commit inside the
+    application still leaked rows into the next test. Deleting every row and
+    resetting sqlite_sequence is slower than a rollback and far more honest
+    about what isolation actually requires here.
+
+    Exposed as its own fixture so a test can reach the database directly, which
+    is how staff promotion is done: there is no endpoint for it.
+    """
+    factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    yield factory
+
+    async with factory() as session:
+        # Children first, otherwise a foreign key from packages to shipments
+        # would refuse the delete. sorted_tables is already topological.
+        for table in reversed(SQLModel.metadata.sorted_tables):
+            await session.execute(delete(table))
+        # Without this, ids keep climbing and a test that happens to look up
+        # /users/1 after fifty others would miss the customer it just created.
+        sequences = await session.execute(
+            text(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='sqlite_sequence'"
+            )
+        )
+        if sequences.first() is not None:
+            await session.execute(text("DELETE FROM sqlite_sequence"))
+        await session.commit()
 
 
 @pytest.fixture(autouse=True)
