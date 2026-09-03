@@ -1,0 +1,32 @@
+# Local development dependencies. The API itself still runs on the host with
+# uvicorn; only the services that are painful to install natively live here.
+# Phase 15 adds the API, worker and frontend to this file.
+name: fleetline
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: fleetline-db
+    environment:
+      POSTGRES_USER: fleetline
+      POSTGRES_PASSWORD: fleetline
+      POSTGRES_DB: fleetline
+    ports:
+      # Exposed on 5433 so it cannot collide with a PostgreSQL already
+      # installed on the host, which would otherwise own 5432.
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready returns success only once the server accepts connections.
+      # Without this, dependent services start while the database is still
+      # initialising and fail their first query.
+      test: ["CMD-SHELL", "pg_isready -U fleetline -d fleetline"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  # A named volume, so data survives `docker compose down`. Removing it takes
+  # an explicit `docker compose down -v`.
+  postgres_data:
