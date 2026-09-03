@@ -131,6 +131,19 @@ async def promote_to_staff(session_factory, email: str) -> None:
         await session.commit()
 
 
+@pytest.fixture(name="staff_client")
+async def staff_client_fixture(
+    auth_client: AsyncClient, session_factory
+) -> AsyncClient:
+    """The logged-in client, promoted to staff.
+
+    The role is read from the row on every request, so the token minted before
+    the promotion keeps working and immediately carries the new permissions.
+    """
+    await promote_to_staff(session_factory, "ada@example.com")
+    return auth_client
+
+
 async def login_as(client: AsyncClient, email: str, full_name: str) -> dict[str, str]:
     """Register a second account and return its Authorization header.
 

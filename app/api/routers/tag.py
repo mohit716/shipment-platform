@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.deps import CurrentStaff, CurrentUser
 from app.db.session import SessionDep
 from app.models.tag import Tag
 from app.schemas.tag import TagCreate, TagRead
@@ -30,9 +31,17 @@ async def require_tag(session: AsyncSession, tag_id: int) -> Tag:
     response_model=TagRead,
     status_code=status.HTTP_201_CREATED,
     summary="Create a handling label",
-    responses={409: {"description": "That tag already exists."}},
+    responses={
+        403: {"description": "Only staff may define handling labels."},
+        409: {"description": "That tag already exists."},
+    },
 )
-async def create_tag(body: TagCreate, session: SessionDep) -> Tag:
+async def create_tag(
+    body: TagCreate,
+    session: SessionDep,
+    # The vocabulary is only closed if customers cannot extend it.
+    current_staff: CurrentStaff,
+) -> Tag:
     tag = Tag(**body.model_dump())
     session.add(tag)
     try:
@@ -48,6 +57,6 @@ async def create_tag(body: TagCreate, session: SessionDep) -> Tag:
 
 
 @router.get("", response_model=list[TagRead], summary="List handling labels")
-async def list_tags(session: SessionDep) -> list[Tag]:
+async def list_tags(session: SessionDep, current_user: CurrentUser) -> list[Tag]:
     results = await session.exec(select(Tag).order_by(Tag.name))
     return list(results.all())

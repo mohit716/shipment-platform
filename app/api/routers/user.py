@@ -7,13 +7,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUser
+from app.api.deps import CurrentStaff, CurrentUser
 from app.core.security import hash_password
 from app.db.session import SessionDep
 from app.models.shipment import Shipment
 from app.models.user import User
 from app.schemas.shipment import ShipmentRead
-from app.schemas.user import UserCreate, UserRead
+from app.schemas.user import UserCreate, UserRead, UserRole
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -60,9 +60,17 @@ async def create_user(body: UserCreate, session: SessionDep) -> User:
     return user
 
 
-@router.get("", response_model=list[UserRead], summary="List customers")
+@router.get(
+    "",
+    response_model=list[UserRead],
+    summary="List customers",
+    responses={403: {"description": "Only staff may browse the customer list."}},
+)
 async def list_users(
     session: SessionDep,
+    # A customer directory is exactly the kind of thing that should not be
+    # readable by anyone who managed to register.
+    current_staff: CurrentStaff,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> list[User]:
@@ -77,7 +85,18 @@ async def list_users(
     summary="Read one customer",
     responses={404: {"description": "No customer carries that reference."}},
 )
-async def get_user(user_id: UserId, session: SessionDep) -> User:
+async def get_user(
+    user_id: UserId,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> User:
+    # Your own record, or anyone's if you are staff. Everything else is a 404,
+    # matching what a nonexistent id returns.
+    if user_id != current_user.id and current_user.role is not UserRole.staff:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Customer {user_id} does not exist.",
+        )
     return await require_user(session, user_id)
 
 
@@ -95,7 +114,7 @@ async def list_user_shipments(
     # Asking for somebody else's shipments reads as 404, the same answer a
     # nonexistent customer gets, so the route cannot be used to discover which
     # ids are real.
-    if user_id != current_user.id:
+    if user_id != current_user.id and current_user.role is not UserRole.staff:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Customer {user_id} does not exist.",

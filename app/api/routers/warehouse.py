@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.deps import CurrentStaff, CurrentUser
 from app.db.session import SessionDep
 from app.models.warehouse import Warehouse
 from app.schemas.warehouse import WarehouseCreate, WarehouseRead
@@ -32,9 +33,18 @@ async def require_warehouse(session: AsyncSession, warehouse_id: int) -> Warehou
     response_model=WarehouseRead,
     status_code=status.HTTP_201_CREATED,
     summary="Register a warehouse",
-    responses={409: {"description": "That depot code is already registered."}},
+    responses={
+        403: {"description": "Only staff may register depots."},
+        409: {"description": "That depot code is already registered."},
+    },
 )
-async def create_warehouse(body: WarehouseCreate, session: SessionDep) -> Warehouse:
+async def create_warehouse(
+    body: WarehouseCreate,
+    session: SessionDep,
+    # Writing the depot network is staff work. Reading it is not: a customer
+    # needs to see where their parcel has been.
+    current_staff: CurrentStaff,
+) -> Warehouse:
     warehouse = Warehouse(**body.model_dump())
     session.add(warehouse)
     try:
@@ -52,6 +62,7 @@ async def create_warehouse(body: WarehouseCreate, session: SessionDep) -> Wareho
 @router.get("", response_model=list[WarehouseRead], summary="List warehouses")
 async def list_warehouses(
     session: SessionDep,
+    current_user: CurrentUser,
     city: Annotated[str | None, Query(description="Filter by city.")] = None,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -70,5 +81,9 @@ async def list_warehouses(
     summary="Read one warehouse",
     responses={404: {"description": "No warehouse carries that reference."}},
 )
-async def get_warehouse(warehouse_id: WarehouseId, session: SessionDep) -> Warehouse:
+async def get_warehouse(
+    warehouse_id: WarehouseId,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Warehouse:
     return await require_warehouse(session, warehouse_id)
