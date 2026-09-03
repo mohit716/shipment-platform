@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, status
 
 from app.api.routers import shipment
+from app.core.config import settings
 from app.db.session import create_db_and_tables
 
 DESCRIPTION = """
@@ -39,7 +40,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     lifespan=lifespan,
-    title="FleetLine",
+    title=settings.app_name,
     description=DESCRIPTION,
     version="0.1.0",
     summary="Shipment management platform.",
@@ -64,4 +65,8 @@ def read_root() -> dict[str, str]:
     response_description="The service is accepting traffic.",
 )
 def health_check() -> dict[str, str]:
-    return {"status": "ok", "version": app.version}
+    return {
+        "status": "ok",
+        "version": app.version,
+        "environment": settings.environment,
+    }

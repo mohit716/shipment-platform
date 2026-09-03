@@ -9,17 +9,14 @@ from sqlmodel import SQLModel
 # only this one keeps .exec(), which returns typed rows for a select(Model).
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-# PostgreSQL, served by the db service in docker-compose.yml. asyncpg is the
-# async driver; psycopg2 would block the event loop on every query. Port 5433
-# because 5432 may already belong to a PostgreSQL installed on the host.
-DATABASE_URL = "postgresql+asyncpg://fleetline:fleetline@localhost:5433/fleetline"
+from app.core.config import settings
 
 # pool_pre_ping issues a cheap SELECT 1 before handing out a pooled connection.
 # Without it, connections dropped by a restarted database or an idle timeout are
 # only discovered when a real query fails.
 engine = create_async_engine(
-    DATABASE_URL,
-    echo=True,
+    settings.database_url,
+    echo=settings.database_echo,
     pool_pre_ping=True,
 )
 
