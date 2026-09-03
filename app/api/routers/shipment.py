@@ -2,6 +2,8 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Path, status
 
+from app.schemas.shipment import Shipment
+
 router = APIRouter(prefix="/shipments", tags=["shipments"])
 
 # Stand-in for a database while the HTTP layer is being built. Everything here is
@@ -51,27 +53,25 @@ def get_shipment(shipment_id: ShipmentId) -> dict[str, Any]:
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, summary="Book a shipment")
-def create_shipment(body: dict[str, Any]) -> dict[str, Any]:
-    # Accepting a bare dict means anything at all is accepted: missing fields,
-    # a weight of "heavy", unknown keys. Pydantic models fix this in phase 2.
+def create_shipment(body: Shipment) -> dict[str, Any]:
     new_id = max(shipments) + 1
-    shipments[new_id] = {"id": new_id, **body}
+    shipments[new_id] = {"id": new_id, **body.model_dump()}
     return shipments[new_id]
 
 
 @router.put("/{shipment_id}", summary="Replace a shipment")
-def replace_shipment(shipment_id: ShipmentId, body: dict[str, Any]) -> dict[str, Any]:
+def replace_shipment(shipment_id: ShipmentId, body: Shipment) -> dict[str, Any]:
     # PUT is a full replacement: the stored record becomes exactly what was sent,
     # so any field the client omits is dropped.
     require_shipment(shipment_id)
-    shipments[shipment_id] = {"id": shipment_id, **body}
+    shipments[shipment_id] = {"id": shipment_id, **body.model_dump()}
     return shipments[shipment_id]
 
 
 @router.patch("/{shipment_id}", summary="Update part of a shipment")
 def update_shipment(shipment_id: ShipmentId, body: dict[str, Any]) -> dict[str, Any]:
-    # PATCH merges: only the keys present in the body are touched, which is what
-    # a status update from a warehouse scanner actually needs.
+    # PATCH still takes a raw dict: a partial update needs every field optional,
+    # which is a separate schema. Commit 18 introduces it.
     shipment = require_shipment(shipment_id)
     shipment.update(body)
     return shipment
