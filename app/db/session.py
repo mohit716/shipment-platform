@@ -1,4 +1,4 @@
-from sqlmodel import create_engine
+from sqlmodel import SQLModel, create_engine
 
 # SQLite keeps the first database commits dependency free: the whole database is
 # one file next to the code. PostgreSQL replaces this in phase 5, and the only
@@ -13,3 +13,16 @@ engine = create_engine(
     echo=True,
     connect_args={"check_same_thread": False},
 )
+
+
+def create_db_and_tables() -> None:
+    """Create any table that does not yet exist.
+
+    This reads SQLModel.metadata, which is only populated for model classes that
+    have actually been imported, hence the import below. It creates missing
+    tables but never alters an existing one, so a changed column is silently
+    ignored. Alembic takes this over in phase 5.
+    """
+    from app.models import shipment  # noqa: F401  (registers the table)
+
+    SQLModel.metadata.create_all(engine)

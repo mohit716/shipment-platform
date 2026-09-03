@@ -1,6 +1,10 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, status
 
 from app.api.routers import shipment
+from app.db.session import create_db_and_tables
 
 DESCRIPTION = """
 FleetLine moves parcels from a customer's door to a delivery address, through
@@ -21,7 +25,20 @@ TAGS_METADATA = [
     },
 ]
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Run once on startup, and again after yield on shutdown.
+
+    This replaced the older @app.on_event("startup") decorators, which are
+    deprecated. Everything before yield happens before the first request is
+    served; everything after runs during a clean shutdown.
+    """
+    create_db_and_tables()
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="FleetLine",
     description=DESCRIPTION,
     version="0.1.0",
