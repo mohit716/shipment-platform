@@ -6,13 +6,16 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.routers.tag import TagId, require_tag
 from app.api.routers.user import require_user
 from app.api.routers.warehouse import WarehouseId, require_warehouse
 from app.db.session import SessionDep
 from app.models.package import Package
 from app.models.shipment import Shipment
+from app.models.tag import Tag
 from app.models.tracking import TrackingEvent
 from app.models.warehouse import Warehouse
+from app.schemas.tag import TagRead
 from app.schemas.tracking import TrackingEventCreate, TrackingEventRead
 from app.schemas.warehouse import WarehouseRead
 from app.services.rates import quote_all_carriers
@@ -53,6 +56,7 @@ async def require_shipment(
                 selectinload(Shipment.customer),
                 selectinload(Shipment.packages),
                 selectinload(Shipment.stops),
+                selectinload(Shipment.tags),
             )
         )
         shipment = (await session.exec(statement)).first()
@@ -321,6 +325,63 @@ async def detach_stop(
 
     refreshed = await require_shipment(session, shipment_id, with_relations=True)
     return refreshed.stops
+
+
+@router.get(
+    "/{shipment_id}/tags",
+    response_model=list[TagRead],
+    summary="List a shipment's handling labels",
+    responses={404: {"description": "No shipment carries that reference."}},
+)
+async def list_shipment_tags(shipment_id: ShipmentId, session: SessionDep) -> list[Tag]:
+    shipment = await require_shipment(session, shipment_id, with_relations=True)
+    return shipment.tags
+
+
+@router.put(
+    "/{shipment_id}/tags/{tag_id}",
+    response_model=list[TagRead],
+    summary="Apply a handling label",
+    responses={404: {"description": "No such shipment or tag."}},
+)
+async def attach_tag(
+    shipment_id: ShipmentId,
+    tag_id: TagId,
+    session: SessionDep,
+) -> list[Tag]:
+    shipment = await require_shipment(session, shipment_id, with_relations=True)
+    tag = await require_tag(session, tag_id)
+
+    if tag not in shipment.tags:
+        shipment.tags.append(tag)
+        session.add(shipment)
+        await session.commit()
+
+    refreshed = await require_shipment(session, shipment_id, with_relations=True)
+    return refreshed.tags
+
+
+@router.delete(
+    "/{shipment_id}/tags/{tag_id}",
+    response_model=list[TagRead],
+    summary="Remove a handling label",
+    responses={404: {"description": "No such shipment or tag."}},
+)
+async def detach_tag(
+    shipment_id: ShipmentId,
+    tag_id: TagId,
+    session: SessionDep,
+) -> list[Tag]:
+    shipment = await require_shipment(session, shipment_id, with_relations=True)
+    tag = await require_tag(session, tag_id)
+
+    if tag in shipment.tags:
+        shipment.tags.remove(tag)
+        session.add(shipment)
+        await session.commit()
+
+    refreshed = await require_shipment(session, shipment_id, with_relations=True)
+    return refreshed.tags
 
 
 @router.delete(

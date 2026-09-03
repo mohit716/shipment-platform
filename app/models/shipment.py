@@ -5,11 +5,13 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Column, DateTime
 from sqlmodel import Field, Relationship, SQLModel
 
+from app.models.tag import ShipmentTagLink
 from app.models.warehouse import ShipmentWarehouseLink
 from app.schemas.shipment import ShipmentStatus
 
 if TYPE_CHECKING:
     from app.models.package import Package
+    from app.models.tag import Tag
     from app.models.tracking import TrackingEvent
     from app.models.user import User
     from app.models.warehouse import Warehouse
@@ -83,4 +85,11 @@ class Shipment(SQLModel, table=True):
     stops: list["Warehouse"] = Relationship(
         back_populates="shipments",
         link_model=ShipmentWarehouseLink,
+    )
+
+    # A second many-to-many. The pattern is identical, which is the point:
+    # once the link table exists, a new one costs almost nothing.
+    tags: list["Tag"] = Relationship(
+        back_populates="shipments",
+        link_model=ShipmentTagLink,
     )

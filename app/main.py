@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, status
 
-from app.api.routers import shipment, user, warehouse
+from app.api.routers import shipment, tag, user, warehouse
 from app.core.config import settings
 
 DESCRIPTION = """
@@ -22,6 +22,10 @@ TAGS_METADATA = [
     {
         "name": "warehouses",
         "description": "Depots and sorting hubs shipments are routed through.",
+    },
+    {
+        "name": "tags",
+        "description": "Handling labels applied to shipments.",
     },
     {
         "name": "shipments",
@@ -61,6 +65,7 @@ app = FastAPI(
 
 app.include_router(user.router)
 app.include_router(warehouse.router)
+app.include_router(tag.router)
 app.include_router(shipment.router)
 
 
