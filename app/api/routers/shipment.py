@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.routers.user import require_user
 from app.db.session import SessionDep
 from app.models.shipment import Shipment
 from app.services.rates import quote_all_carriers
@@ -41,6 +42,10 @@ async def list_shipments(
         ShipmentStatus | None,
         Query(alias="status", description="Return only shipments in this state."),
     ] = None,
+    customer_id: Annotated[
+        int | None,
+        Query(ge=1, description="Filter to one customer's shipments."),
+    ] = None,
     destination: Annotated[
         int | None,
         Query(ge=10000, le=99999, description="Filter by destination postcode."),
@@ -53,6 +58,8 @@ async def list_shipments(
     statement = select(Shipment)
     if status_filter is not None:
         statement = statement.where(Shipment.status == status_filter)
+    if customer_id is not None:
+        statement = statement.where(Shipment.customer_id == customer_id)
     if destination is not None:
         statement = statement.where(Shipment.destination == destination)
     statement = statement.order_by(Shipment.id).offset(offset).limit(limit)
@@ -104,6 +111,9 @@ async def get_shipment(shipment_id: ShipmentId, session: SessionDep) -> Shipment
     },
 )
 async def create_shipment(body: ShipmentCreate, session: SessionDep) -> Shipment:
+    # Checked explicitly so an unknown customer produces a clear 404 rather than
+    # a foreign key violation surfacing as a 500.
+    await require_user(session, body.customer_id)
     shipment = Shipment(**body.model_dump())
     session.add(shipment)
     await session.commit()

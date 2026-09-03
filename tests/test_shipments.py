@@ -12,10 +12,30 @@ VALID_BOOKING = {
 }
 
 
+async def register(client: AsyncClient, email: str = "ada@example.com") -> dict:
+    response = await client.post(
+        "/users", json={"email": email, "full_name": "Ada Lovelace"}
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
 async def book(client: AsyncClient, **overrides: object) -> dict:
+    """Book a shipment, registering a customer first if none was supplied."""
+    if "customer_id" not in overrides:
+        overrides["customer_id"] = (await register(client, _unique_email()))["id"]
     response = await client.post("/shipments", json={**VALID_BOOKING, **overrides})
     assert response.status_code == 201
     return response.json()
+
+
+_email_counter = 0
+
+
+def _unique_email() -> str:
+    global _email_counter
+    _email_counter += 1
+    return f"customer{_email_counter}@example.com"
 
 
 async def test_health_reports_ok(client: AsyncClient) -> None:
@@ -66,7 +86,10 @@ async def test_patch_changes_only_the_supplied_field(client: AsyncClient) -> Non
 
 async def test_put_replaces_and_resets_omitted_fields(client: AsyncClient) -> None:
     created = await book(client, status="in_transit")
-    response = await client.put(f"/shipments/{created['id']}", json=VALID_BOOKING)
+    response = await client.put(
+        f"/shipments/{created['id']}",
+        json={**VALID_BOOKING, "customer_id": created["customer_id"]},
+    )
     # status was omitted from the body, so it falls back to the schema default.
     assert response.json()["status"] == "placed"
 
@@ -78,22 +101,49 @@ async def test_delete_removes_the_shipment(client: AsyncClient) -> None:
 
 
 async def test_overweight_parcel_is_rejected(client: AsyncClient) -> None:
-    response = await client.post("/shipments", json={**VALID_BOOKING, "weight_kg": 90})
+    customer = await register(client)
+    response = await client.post(
+        "/shipments",
+        json={**VALID_BOOKING, "customer_id": customer["id"], "weight_kg": 90},
+    )
     assert response.status_code == 422
 
 
 async def test_prohibited_content_is_rejected(client: AsyncClient) -> None:
+    customer = await register(client)
     response = await client.post(
-        "/shipments", json={**VALID_BOOKING, "content": "firearm parts"}
+        "/shipments",
+        json={**VALID_BOOKING, "customer_id": customer["id"], "content": "firearm parts"},
     )
     assert response.status_code == 422
 
 
 async def test_unknown_status_is_rejected(client: AsyncClient) -> None:
+    customer = await register(client)
     response = await client.post(
-        "/shipments", json={**VALID_BOOKING, "status": "delivrd"}
+        "/shipments",
+        json={**VALID_BOOKING, "customer_id": customer["id"], "status": "delivrd"},
     )
     assert response.status_code == 422
+
+
+async def test_booking_for_an_unknown_customer_is_rejected(
+    client: AsyncClient,
+) -> None:
+    response = await client.post(
+        "/shipments", json={**VALID_BOOKING, "customer_id": 9999}
+    )
+    assert response.status_code == 404
+    assert "Customer 9999" in response.json()["detail"]
+
+
+async def test_shipments_can_be_filtered_by_customer(client: AsyncClient) -> None:
+    first = await book(client)
+    await book(client)
+    response = await client.get(
+        "/shipments", params={"customer_id": first["customer_id"]}
+    )
+    assert [row["id"] for row in response.json()] == [first["id"]]
 
 
 async def test_status_filter_narrows_the_list(client: AsyncClient) -> None:

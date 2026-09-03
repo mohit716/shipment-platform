@@ -64,6 +64,7 @@ class ShipmentBase(BaseModel):
 class ShipmentCreate(ShipmentBase):
     """What a client may send when booking. Note the absence of id."""
 
+    customer_id: int = Field(ge=1, description="The customer booking the shipment.")
     status: ShipmentStatus = Field(
         default=ShipmentStatus.placed,
         description="Current lifecycle state.",
@@ -76,6 +77,7 @@ class ShipmentCreate(ShipmentBase):
                     "content": "ceramic dinnerware, double boxed",
                     "weight_kg": 2.4,
                     "destination": 11001,
+                    "customer_id": 1,
                 }
             ]
         }
@@ -99,6 +101,7 @@ class ShipmentRead(ShipmentBase):
     """What the API returns. The server owns id, so it appears only here."""
 
     id: int
+    customer_id: int
     status: ShipmentStatus
     estimated_delivery: datetime | None = Field(
         default=None,

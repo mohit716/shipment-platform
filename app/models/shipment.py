@@ -22,6 +22,12 @@ class Shipment(SQLModel, table=True):
     weight_kg: float
     destination: int
 
+    # A foreign key is enforced by the database: a shipment cannot reference a
+    # customer that does not exist, and the customer cannot be deleted while
+    # shipments still point at them. Indexed because "every shipment for this
+    # customer" is the query the dashboard runs constantly.
+    customer_id: int = Field(foreign_key="users.id", index=True)
+
     # index=True because shipments are listed and filtered by status constantly,
     # which is exactly the access pattern an index exists to serve.
     status: ShipmentStatus = Field(default=ShipmentStatus.placed, index=True)
