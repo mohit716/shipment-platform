@@ -74,6 +74,46 @@ class SMTPNotifier:
             server.send_message(message)
 
 
+class SMSNotifier:
+    """Stands in for a gateway such as Twilio.
+
+    Not wired to a real provider: every SMS gateway needs an account, a paid
+    number and a verified sender, none of which teaches anything the interface
+    does not already show. What matters is that the channel plugs in without a
+    single caller changing.
+    """
+
+    def send(self, notification: Notification) -> None:
+        logger.info(
+            "[sms] to=%s %s",
+            notification.recipient,
+            # Real gateways bill per 160 character segment, so the body is
+            # truncated here rather than surprising anyone with the bill.
+            notification.body[:160],
+        )
+
+
+class CompositeNotifier:
+    """Fans one message out to several channels.
+
+    Callers still see a single Notifier, so adding SMS alongside email is a
+    configuration change rather than an edit to every place that sends.
+    """
+
+    def __init__(self, *notifiers: "Notifier") -> None:
+        self.notifiers = notifiers
+
+    def send(self, notification: Notification) -> None:
+        for notifier in self.notifiers:
+            # One failing channel must not silence the others. An email that
+            # arrives is better than neither, and a failed SMS is not a reason
+            # to fail the request that triggered it.
+            try:
+                notifier.send(notification)
+            except Exception:
+                logger.exception("channel %r failed", notifier)
+
+
 class MemoryNotifier:
     """Keeps everything in a list so tests can assert on it.
 
@@ -95,6 +135,9 @@ def get_notifier() -> Notifier:
     A dependency rather than a module-level singleton, so a test can override
     it the same way it overrides the database session.
     """
-    if settings.email_backend == "smtp":
-        return SMTPNotifier()
-    return ConsoleNotifier()
+    email: Notifier = (
+        SMTPNotifier() if settings.email_backend == "smtp" else ConsoleNotifier()
+    )
+    if not settings.sms_enabled:
+        return email
+    return CompositeNotifier(email, SMSNotifier())

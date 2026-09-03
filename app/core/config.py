@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # should be usable for about as long as it takes to read the email.
     reset_token_expire_minutes: int = 15
 
+    # Adds an SMS channel alongside email. Off by default: every gateway needs
+    # a paid account and a verified sender before it will deliver anything.
+    sms_enabled: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

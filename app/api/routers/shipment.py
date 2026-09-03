@@ -351,19 +351,39 @@ async def add_tracking_event(
     # who can write their own scans can declare a parcel delivered, and the
     # timeline is meant to be evidence rather than a claim.
     current_staff: CurrentStaff,
+    background: BackgroundTasks,
+    notifier: NotifierDep,
 ) -> TrackingEvent:
-    shipment = await require_shipment(session, shipment_id)
+    shipment = await require_shipment(session, shipment_id, with_relations=True)
 
     event = TrackingEvent(shipment_id=shipment_id, **body.model_dump())
     session.add(event)
     # The scan is the source of truth, so the shipment's current status follows
     # from it. Both writes share one transaction: the timeline and the summary
     # cannot disagree.
+    previous_status = shipment.status
     shipment.status = body.status
     session.add(shipment)
 
     await session.commit()
     await session.refresh(event)
+
+    # Only on an actual change. Depots rescan parcels routinely, and a customer
+    # who gets a text every time a barcode is read will stop reading them.
+    if body.status is not previous_status:
+        background.add_task(
+            notifier.send,
+            Notification(
+                channel="email",
+                recipient=shipment.customer.email,
+                subject=f"Shipment {shipment.id} is now {body.status.value}",
+                body=(
+                    f"Hello {shipment.customer.full_name},\n\n"
+                    f"Your shipment {shipment.id} was scanned at "
+                    f"{body.location} and is now {body.status.value}.\n"
+                ),
+            ),
+        )
     return event
 
 
