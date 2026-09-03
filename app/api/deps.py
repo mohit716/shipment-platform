@@ -6,6 +6,7 @@ from fastapi.security import OAuth2PasswordBearer
 from app.core.tokens import TokenError, read_access_token
 from app.db.session import SessionDep
 from app.models.user import User
+from app.schemas.user import UserRole
 
 # tokenUrl is documentation, not routing: it tells OpenAPI which endpoint hands
 # out tokens so Swagger UI's Authorize button knows where to post credentials.
@@ -49,3 +50,23 @@ async def get_current_user(
 # Writing CurrentUser in a signature both injects the user and documents the
 # route as requiring a bearer token in OpenAPI.
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def get_current_staff(current_user: CurrentUser) -> User:
+    """Require the caller to be staff.
+
+    A dependency that itself depends on get_current_user, so the token is only
+    parsed once no matter how deep the chain gets. 403 rather than 404 here: the
+    caller is authenticated and the route plainly exists, so hiding it would
+    only be confusing. That is the opposite call to shipment ownership, where
+    the reference itself is the secret.
+    """
+    if current_user.role is not UserRole.staff:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action requires a staff account.",
+        )
+    return current_user
+
+
+CurrentStaff = Annotated[User, Depends(get_current_staff)]

@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Column, DateTime
 from sqlmodel import Field, Relationship, SQLModel
 
+from app.schemas.user import UserRole
+
 if TYPE_CHECKING:
     # Import only for type checkers. At runtime this would be a circular import,
     # since shipment.py imports this module too. SQLModel resolves the string
@@ -28,6 +30,11 @@ class User(SQLModel, table=True):
     # The hash, never the password. Nothing in the codebase reads this field
     # except verify_password, and no response schema exposes it.
     hashed_password: str = Field(max_length=128)
+
+    # Not settable through the public registration endpoint. Everyone who signs
+    # up is a customer; staff are promoted deliberately, because a role a client
+    # can choose is not a permission boundary at all.
+    role: UserRole = Field(default=UserRole.customer, index=True)
 
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
