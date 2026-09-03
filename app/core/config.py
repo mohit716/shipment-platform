@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     # the window in which a leaked one is useful should be small.
     verification_token_expire_minutes: int = 60
 
+    # Shorter still. A reset link is a live credential for the account, so it
+    # should be usable for about as long as it takes to read the email.
+    reset_token_expire_minutes: int = 15
+
 
 @lru_cache
 def get_settings() -> Settings:
