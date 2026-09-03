@@ -86,6 +86,78 @@ async def test_list_view_does_not_embed_the_customer(client: AsyncClient) -> Non
     assert "customer" not in row
 
 
+BOX = {
+    "description": "outer carton",
+    "weight_kg": 2.4,
+    "length_cm": 40,
+    "width_cm": 30,
+    "height_cm": 20,
+}
+
+
+async def test_booking_creates_nested_packages(client: AsyncClient) -> None:
+    created = await book(client, packages=[BOX, {**BOX, "description": "spares box"}])
+    detail = (await client.get(f"/shipments/{created['id']}")).json()
+
+    assert len(detail["packages"]) == 2
+    assert {p["description"] for p in detail["packages"]} == {
+        "outer carton",
+        "spares box",
+    }
+    # Every child was given the parent's id without the client supplying it.
+    assert all(p["shipment_id"] == created["id"] for p in detail["packages"])
+
+
+async def test_volumetric_weight_is_derived_from_dimensions(
+    client: AsyncClient,
+) -> None:
+    created = await book(client, packages=[BOX])
+    package = (await client.get(f"/shipments/{created['id']}")).json()["packages"][0]
+    # 40 * 30 * 20 / 5000
+    assert package["volumetric_weight_kg"] == 4.8
+
+
+async def test_deleting_a_shipment_removes_its_packages(client: AsyncClient) -> None:
+    created = await book(client, packages=[BOX])
+    assert (await client.delete(f"/shipments/{created['id']}")).status_code == 204
+    assert (await client.get(f"/shipments/{created['id']}")).status_code == 404
+
+
+async def test_put_replaces_the_package_list(client: AsyncClient) -> None:
+    created = await book(client, packages=[BOX, {**BOX, "description": "spares box"}])
+    response = await client.put(
+        f"/shipments/{created['id']}",
+        json={
+            **VALID_BOOKING,
+            "customer_id": created["customer_id"],
+            "packages": [{**BOX, "description": "single replacement carton"}],
+        },
+    )
+    assert response.status_code == 200
+    packages = response.json()["packages"]
+    # The two originals were orphaned by the replacement and deleted.
+    assert [p["description"] for p in packages] == ["single replacement carton"]
+
+
+async def test_a_shipment_may_have_no_packages(client: AsyncClient) -> None:
+    created = await book(client)
+    detail = (await client.get(f"/shipments/{created['id']}")).json()
+    assert detail["packages"] == []
+
+
+async def test_invalid_package_dimensions_are_rejected(client: AsyncClient) -> None:
+    customer = await register(client, "boxes@example.com")
+    response = await client.post(
+        "/shipments",
+        json={
+            **VALID_BOOKING,
+            "customer_id": customer["id"],
+            "packages": [{**BOX, "height_cm": 0}],
+        },
+    )
+    assert response.status_code == 422
+
+
 async def test_reading_a_missing_shipment_returns_404(client: AsyncClient) -> None:
     response = await client.get("/shipments/4242")
     assert response.status_code == 404

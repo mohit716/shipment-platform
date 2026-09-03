@@ -8,6 +8,7 @@ from sqlmodel import Field, Relationship, SQLModel
 from app.schemas.shipment import ShipmentStatus
 
 if TYPE_CHECKING:
+    from app.models.package import Package
     from app.models.user import User
 
 
@@ -52,3 +53,11 @@ class Shipment(SQLModel, table=True):
     # updates that user's shipments list in the same session, because both names
     # describe one relationship rather than two independent ones.
     customer: "User" = Relationship(back_populates="shipments")
+
+    # cascade delete-orphan means deleting a shipment deletes its packages, and
+    # removing a package from this list deletes that row rather than leaving it
+    # parentless.
+    packages: list["Package"] = Relationship(
+        back_populates="shipment",
+        cascade_delete=True,
+    )

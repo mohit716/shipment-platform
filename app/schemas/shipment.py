@@ -3,6 +3,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.schemas.package import PackageCreate, PackageRead
+
 # Items a parcel carrier is not licensed to move. Checked against the content
 # description so the rejection happens at the edge rather than at the depot.
 PROHIBITED_CONTENT = ("explosive", "firearm", "ammunition", "livestock")
@@ -69,6 +71,13 @@ class ShipmentCreate(ShipmentBase):
         default=ShipmentStatus.placed,
         description="Current lifecycle state.",
     )
+    # Nested creation: one request books the shipment and its boxes together,
+    # inside a single transaction, so a half-created booking is impossible.
+    packages: list[PackageCreate] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Individual boxes making up this shipment.",
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -78,6 +87,15 @@ class ShipmentCreate(ShipmentBase):
                     "weight_kg": 2.4,
                     "destination": 11001,
                     "customer_id": 1,
+                    "packages": [
+                        {
+                            "description": "outer carton",
+                            "weight_kg": 2.4,
+                            "length_cm": 40,
+                            "width_cm": 30,
+                            "height_cm": 20,
+                        }
+                    ],
                 }
             ]
         }
@@ -118,9 +136,10 @@ class ShipmentRead(ShipmentBase):
 
 
 class ShipmentWithCustomer(ShipmentRead):
-    """A shipment with its customer embedded, for the detail view."""
+    """A shipment with its customer and boxes embedded, for the detail view."""
 
     customer: CustomerSummary
+    packages: list[PackageRead] = Field(default_factory=list)
     estimated_delivery: datetime | None = Field(
         default=None,
         description="Derived from weight; heavier parcels move by road.",

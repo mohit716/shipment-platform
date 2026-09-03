@@ -8,6 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.routers.user import require_user
 from app.db.session import SessionDep
+from app.models.package import Package
 from app.models.shipment import Shipment
 from app.services.rates import quote_all_carriers
 from app.schemas.shipment import (
@@ -26,9 +27,32 @@ ShipmentId = Annotated[
 ]
 
 
-async def require_shipment(session: AsyncSession, shipment_id: int) -> Shipment:
-    """Return a shipment row or abort the request with 404."""
-    shipment = await session.get(Shipment, shipment_id)
+async def require_shipment(
+    session: AsyncSession,
+    shipment_id: int,
+    *,
+    with_relations: bool = False,
+) -> Shipment:
+    """Return a shipment row or abort the request with 404.
+
+    with_relations eagerly loads the customer and packages. Any handler that
+    touches those collections must ask for them: reading an unloaded
+    relationship inside async code raises MissingGreenlet rather than quietly
+    emitting an extra query the way sync code would.
+    """
+    if with_relations:
+        statement = (
+            select(Shipment)
+            .where(Shipment.id == shipment_id)
+            .options(
+                selectinload(Shipment.customer),
+                selectinload(Shipment.packages),
+            )
+        )
+        shipment = (await session.exec(statement)).first()
+    else:
+        shipment = await session.get(Shipment, shipment_id)
+
     if shipment is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -99,21 +123,9 @@ async def compare_carrier_rates(
     responses={404: {"description": "No shipment carries that reference."}},
 )
 async def get_shipment(shipment_id: ShipmentId, session: SessionDep) -> Shipment:
-    # One statement, one round trip. Without the eager load, serialising the
-    # nested customer would touch shipment.customer and trigger a lazy query,
-    # which raises MissingGreenlet under async.
-    statement = (
-        select(Shipment)
-        .where(Shipment.id == shipment_id)
-        .options(selectinload(Shipment.customer))
-    )
-    shipment = (await session.exec(statement)).first()
-    if shipment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Shipment {shipment_id} does not exist.",
-        )
-    return shipment
+    # Eager loaded, because serialising the nested customer and packages would
+    # otherwise touch unloaded relationships and raise MissingGreenlet.
+    return await require_shipment(session, shipment_id, with_relations=True)
 
 
 @router.post(
@@ -130,7 +142,14 @@ async def create_shipment(body: ShipmentCreate, session: SessionDep) -> Shipment
     # Checked explicitly so an unknown customer produces a clear 404 rather than
     # a foreign key violation surfacing as a 500.
     await require_user(session, body.customer_id)
-    shipment = Shipment(**body.model_dump())
+
+    fields = body.model_dump(exclude={"packages"})
+    shipment = Shipment(**fields)
+    # Appending to the relationship rather than setting shipment_id by hand:
+    # SQLAlchemy works out the insert order and fills in the foreign key once
+    # the parent has an id, all within one transaction.
+    shipment.packages = [Package(**package.model_dump()) for package in body.packages]
+
     session.add(shipment)
     await session.commit()
     # The id was assigned by the database during commit, so the in-memory
@@ -141,7 +160,7 @@ async def create_shipment(body: ShipmentCreate, session: SessionDep) -> Shipment
 
 @router.put(
     "/{shipment_id}",
-    response_model=ShipmentRead,
+    response_model=ShipmentWithCustomer,
     summary="Replace a shipment",
 )
 async def replace_shipment(
@@ -149,13 +168,22 @@ async def replace_shipment(
     body: ShipmentCreate,
     session: SessionDep,
 ) -> Shipment:
-    shipment = await require_shipment(session, shipment_id)
-    for field, value in body.model_dump().items():
+    # with_relations is required here: replacing the packages list compares it
+    # against the current one, and comparing against an unloaded collection
+    # would trigger a lazy load.
+    shipment = await require_shipment(session, shipment_id, with_relations=True)
+    await require_user(session, body.customer_id)
+
+    for field, value in body.model_dump(exclude={"packages"}).items():
         setattr(shipment, field, value)
+
+    # PUT replaces, so the old boxes go. delete-orphan on the relationship is
+    # what turns "removed from this list" into "deleted from the table".
+    shipment.packages = [Package(**package.model_dump()) for package in body.packages]
+
     session.add(shipment)
     await session.commit()
-    await session.refresh(shipment)
-    return shipment
+    return await require_shipment(session, shipment_id, with_relations=True)
 
 
 @router.patch(
