@@ -74,3 +74,11 @@ def create_shipment(body: dict[str, Any]) -> dict[str, Any]:
     new_id = max(shipments) + 1
     shipments[new_id] = {"id": new_id, **body}
     return shipments[new_id]
+
+
+@app.put("/shipments/{shipment_id}", tags=["shipments"], summary="Replace a shipment")
+def replace_shipment(shipment_id: int, body: dict[str, Any]) -> dict[str, Any]:
+    # PUT is a full replacement: the stored record becomes exactly what was sent,
+    # so any field the client omits is dropped.
+    shipments[shipment_id] = {"id": shipment_id, **body}
+    return shipments[shipment_id]
