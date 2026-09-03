@@ -19,6 +19,7 @@ from app.main import app
 from app.models.user import User
 from app.schemas.user import UserRole
 from app.services.notifications import MemoryNotifier, get_notifier
+from tests.factories import bearer, login, register
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -164,15 +165,7 @@ async def client_fixture(
 @pytest.fixture(name="customer")
 async def customer_fixture(client: AsyncClient) -> dict:
     """A registered account, returned as the API represents it."""
-    response = await client.post(
-        "/users",
-        json={
-            "email": "ada@example.com",
-            "full_name": "Ada Lovelace",
-            "password": "correct-horse",
-        },
-    )
-    return response.json()
+    return await register(client)
 
 
 @pytest.fixture(name="auth_client")
@@ -182,11 +175,7 @@ async def auth_client_fixture(client: AsyncClient, customer: dict) -> AsyncClien
     Setting the header once here rather than per request keeps the tests about
     the behaviour under test instead of about authentication plumbing.
     """
-    response = await client.post(
-        "/auth/token",
-        data={"username": "ada@example.com", "password": "correct-horse"},
-    )
-    token = response.json()["access_token"]
+    token = await login(client, email=customer["email"])
     client.headers["Authorization"] = f"Bearer {token}"
     return client
 
@@ -225,11 +214,4 @@ async def login_as(client: AsyncClient, email: str, full_name: str) -> dict[str,
     Used by the ownership tests, which need two callers to prove one cannot see
     the other's shipments.
     """
-    await client.post(
-        "/users",
-        json={"email": email, "full_name": full_name, "password": "correct-horse"},
-    )
-    response = await client.post(
-        "/auth/token", data={"username": email, "password": "correct-horse"}
-    )
-    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+    return await bearer(client, email=email, full_name=full_name)

@@ -2,27 +2,12 @@ import pytest
 from httpx import AsyncClient
 
 from tests.conftest import login_as
+from tests.factories import BOOKING as VALID_BOOKING
+from tests.factories import book
 
 # Applies the anyio marker to every test in the module, so each one no longer
 # needs its own decorator.
 pytestmark = pytest.mark.anyio
-
-VALID_BOOKING = {
-    "content": "ceramic dinnerware",
-    "weight_kg": 2.4,
-    "destination": 11001,
-}
-
-
-async def book(auth_client: AsyncClient, **overrides: object) -> dict:
-    """Book a shipment as the logged-in customer.
-
-    No customer_id anywhere: the owner comes from the access token now, so the
-    helper no longer has to invent a customer per booking.
-    """
-    response = await auth_client.post("/shipments", json={**VALID_BOOKING, **overrides})
-    assert response.status_code == 201
-    return response.json()
 
 
 async def test_health_reports_ok(auth_client: AsyncClient) -> None:
