@@ -9,6 +9,7 @@ from app.schemas.shipment import ShipmentStatus
 
 if TYPE_CHECKING:
     from app.models.package import Package
+    from app.models.tracking import TrackingEvent
     from app.models.user import User
 
 
@@ -60,4 +61,16 @@ class Shipment(SQLModel, table=True):
     packages: list["Package"] = Relationship(
         back_populates="shipment",
         cascade_delete=True,
+    )
+
+    # order_by is declared on the relationship so the timeline is chronological
+    # wherever it is loaded, rather than depending on each query remembering.
+    tracking_events: list["TrackingEvent"] = Relationship(
+        back_populates="shipment",
+        cascade_delete=True,
+        # id breaks ties: two scans recorded in the same microsecond would
+        # otherwise come back in arbitrary order.
+        sa_relationship_kwargs={
+            "order_by": "(TrackingEvent.recorded_at, TrackingEvent.id)"
+        },
     )

@@ -10,6 +10,8 @@ from app.api.routers.user import require_user
 from app.db.session import SessionDep
 from app.models.package import Package
 from app.models.shipment import Shipment
+from app.models.tracking import TrackingEvent
+from app.schemas.tracking import TrackingEventCreate, TrackingEventRead
 from app.services.rates import quote_all_carriers
 from app.schemas.shipment import (
     ShipmentCreate,
@@ -205,6 +207,55 @@ async def update_shipment(
     await session.commit()
     await session.refresh(shipment)
     return shipment
+
+
+@router.get(
+    "/{shipment_id}/tracking",
+    response_model=list[TrackingEventRead],
+    summary="Read a shipment's tracking timeline",
+    responses={404: {"description": "No shipment carries that reference."}},
+)
+async def list_tracking_events(
+    shipment_id: ShipmentId,
+    session: SessionDep,
+) -> list[TrackingEvent]:
+    await require_shipment(session, shipment_id)
+    statement = (
+        select(TrackingEvent)
+        .where(TrackingEvent.shipment_id == shipment_id)
+        # id breaks ties: two scans recorded in the same microsecond would
+        # otherwise come back in arbitrary order.
+        .order_by(TrackingEvent.recorded_at, TrackingEvent.id)
+    )
+    results = await session.exec(statement)
+    return list(results.all())
+
+
+@router.post(
+    "/{shipment_id}/tracking",
+    response_model=TrackingEventRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Record a tracking scan",
+    responses={404: {"description": "No shipment carries that reference."}},
+)
+async def add_tracking_event(
+    shipment_id: ShipmentId,
+    body: TrackingEventCreate,
+    session: SessionDep,
+) -> TrackingEvent:
+    shipment = await require_shipment(session, shipment_id)
+
+    event = TrackingEvent(shipment_id=shipment_id, **body.model_dump())
+    session.add(event)
+    # The scan is the source of truth, so the shipment's current status follows
+    # from it. Both writes share one transaction: the timeline and the summary
+    # cannot disagree.
+    shipment.status = body.status
+    session.add(shipment)
+
+    await session.commit()
+    await session.refresh(event)
+    return event
 
 
 @router.delete(

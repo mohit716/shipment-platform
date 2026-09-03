@@ -158,6 +158,77 @@ async def test_invalid_package_dimensions_are_rejected(client: AsyncClient) -> N
     assert response.status_code == 422
 
 
+async def test_tracking_timeline_starts_empty(client: AsyncClient) -> None:
+    created = await book(client)
+    response = await client.get(f"/shipments/{created['id']}/tracking")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+async def test_recording_a_scan_advances_the_shipment_status(
+    client: AsyncClient,
+) -> None:
+    created = await book(client)
+    assert created["status"] == "placed"
+
+    response = await client.post(
+        f"/shipments/{created['id']}/tracking",
+        json={"status": "picked_up", "location": "Leeds depot"},
+    )
+    assert response.status_code == 201
+    assert response.json()["location"] == "Leeds depot"
+
+    # The summary follows the scan, in the same transaction.
+    detail = (await client.get(f"/shipments/{created['id']}")).json()
+    assert detail["status"] == "picked_up"
+
+
+async def test_timeline_is_returned_in_chronological_order(
+    client: AsyncClient,
+) -> None:
+    created = await book(client)
+    for status_value, location in [
+        ("picked_up", "Leeds depot"),
+        ("in_transit", "M1 northbound"),
+        ("at_warehouse", "Newcastle hub"),
+        ("delivered", "customer address"),
+    ]:
+        await client.post(
+            f"/shipments/{created['id']}/tracking",
+            json={"status": status_value, "location": location},
+        )
+
+    timeline = (await client.get(f"/shipments/{created['id']}/tracking")).json()
+    assert [event["status"] for event in timeline] == [
+        "picked_up",
+        "in_transit",
+        "at_warehouse",
+        "delivered",
+    ]
+    timestamps = [event["recorded_at"] for event in timeline]
+    assert timestamps == sorted(timestamps)
+
+
+async def test_deleting_a_shipment_removes_its_tracking_events(
+    client: AsyncClient,
+) -> None:
+    created = await book(client)
+    await client.post(
+        f"/shipments/{created['id']}/tracking",
+        json={"status": "picked_up", "location": "Leeds depot"},
+    )
+    assert (await client.delete(f"/shipments/{created['id']}")).status_code == 204
+    assert (await client.get(f"/shipments/{created['id']}/tracking")).status_code == 404
+
+
+async def test_scanning_an_unknown_shipment_returns_404(client: AsyncClient) -> None:
+    response = await client.post(
+        "/shipments/4242/tracking",
+        json={"status": "picked_up", "location": "Leeds depot"},
+    )
+    assert response.status_code == 404
+
+
 async def test_reading_a_missing_shipment_returns_404(client: AsyncClient) -> None:
     response = await client.get("/shipments/4242")
     assert response.status_code == 404
