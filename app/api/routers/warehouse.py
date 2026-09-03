@@ -11,6 +11,8 @@ from app.schemas.warehouse import WarehouseCreate, WarehouseRead
 
 router = APIRouter(prefix="/warehouses", tags=["warehouses"])
 
+# Exported so the shipment router can reuse the same validation for the
+# warehouse_id in its /stops routes.
 WarehouseId = Annotated[int, Path(ge=1, description="Warehouse reference.")]
 
 

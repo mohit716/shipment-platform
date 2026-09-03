@@ -7,11 +7,14 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.routers.user import require_user
+from app.api.routers.warehouse import WarehouseId, require_warehouse
 from app.db.session import SessionDep
 from app.models.package import Package
 from app.models.shipment import Shipment
 from app.models.tracking import TrackingEvent
+from app.models.warehouse import Warehouse
 from app.schemas.tracking import TrackingEventCreate, TrackingEventRead
+from app.schemas.warehouse import WarehouseRead
 from app.services.rates import quote_all_carriers
 from app.schemas.shipment import (
     ShipmentCreate,
@@ -49,6 +52,7 @@ async def require_shipment(
             .options(
                 selectinload(Shipment.customer),
                 selectinload(Shipment.packages),
+                selectinload(Shipment.stops),
             )
         )
         shipment = (await session.exec(statement)).first()
@@ -256,6 +260,67 @@ async def add_tracking_event(
     await session.commit()
     await session.refresh(event)
     return event
+
+
+@router.get(
+    "/{shipment_id}/stops",
+    response_model=list[WarehouseRead],
+    summary="List a shipment's routing stops",
+    responses={404: {"description": "No shipment carries that reference."}},
+)
+async def list_stops(shipment_id: ShipmentId, session: SessionDep) -> list[Warehouse]:
+    shipment = await require_shipment(session, shipment_id, with_relations=True)
+    return shipment.stops
+
+
+@router.put(
+    "/{shipment_id}/stops/{warehouse_id}",
+    response_model=list[WarehouseRead],
+    summary="Add a routing stop",
+    responses={404: {"description": "No such shipment or warehouse."}},
+)
+async def attach_stop(
+    shipment_id: ShipmentId,
+    warehouse_id: WarehouseId,
+    session: SessionDep,
+) -> list[Warehouse]:
+    shipment = await require_shipment(session, shipment_id, with_relations=True)
+    warehouse = await require_warehouse(session, warehouse_id)
+
+    # PUT, so attaching twice is idempotent. Appending unconditionally would
+    # violate the link table's composite primary key on the second call.
+    if warehouse not in shipment.stops:
+        shipment.stops.append(warehouse)
+        session.add(shipment)
+        await session.commit()
+
+    refreshed = await require_shipment(session, shipment_id, with_relations=True)
+    return refreshed.stops
+
+
+@router.delete(
+    "/{shipment_id}/stops/{warehouse_id}",
+    response_model=list[WarehouseRead],
+    summary="Remove a routing stop",
+    responses={404: {"description": "No such shipment or warehouse."}},
+)
+async def detach_stop(
+    shipment_id: ShipmentId,
+    warehouse_id: WarehouseId,
+    session: SessionDep,
+) -> list[Warehouse]:
+    shipment = await require_shipment(session, shipment_id, with_relations=True)
+    warehouse = await require_warehouse(session, warehouse_id)
+
+    # Removing from the list deletes the link row only. The warehouse itself is
+    # a shared entity and must survive being dropped from one shipment's route.
+    if warehouse in shipment.stops:
+        shipment.stops.remove(warehouse)
+        session.add(shipment)
+        await session.commit()
+
+    refreshed = await require_shipment(session, shipment_id, with_relations=True)
+    return refreshed.stops
 
 
 @router.delete(
