@@ -148,12 +148,12 @@ async def test_tracking_timeline_starts_empty(auth_client: AsyncClient) -> None:
 
 
 async def test_recording_a_scan_advances_the_shipment_status(
-    auth_client: AsyncClient,
+    staff_client: AsyncClient,
 ) -> None:
-    created = await book(auth_client)
+    created = await book(staff_client)
     assert created["status"] == "placed"
 
-    response = await auth_client.post(
+    response = await staff_client.post(
         f"/shipments/{created['id']}/tracking",
         json={"status": "picked_up", "location": "Leeds depot"},
     )
@@ -161,26 +161,38 @@ async def test_recording_a_scan_advances_the_shipment_status(
     assert response.json()["location"] == "Leeds depot"
 
     # The summary follows the scan, in the same transaction.
-    detail = (await auth_client.get(f"/shipments/{created['id']}")).json()
+    detail = (await staff_client.get(f"/shipments/{created['id']}")).json()
     assert detail["status"] == "picked_up"
 
 
-async def test_timeline_is_returned_in_chronological_order(
+async def test_a_customer_cannot_scan_their_own_shipment(
     auth_client: AsyncClient,
 ) -> None:
     created = await book(auth_client)
+    # A customer who can write scans can declare their own parcel delivered.
+    response = await auth_client.post(
+        f"/shipments/{created['id']}/tracking",
+        json={"status": "delivered", "location": "wherever I say"},
+    )
+    assert response.status_code == 403
+
+
+async def test_timeline_is_returned_in_chronological_order(
+    staff_client: AsyncClient,
+) -> None:
+    created = await book(staff_client)
     for status_value, location in [
         ("picked_up", "Leeds depot"),
         ("in_transit", "M1 northbound"),
         ("at_warehouse", "Newcastle hub"),
         ("delivered", "customer address"),
     ]:
-        await auth_client.post(
+        await staff_client.post(
             f"/shipments/{created['id']}/tracking",
             json={"status": status_value, "location": location},
         )
 
-    timeline = (await auth_client.get(f"/shipments/{created['id']}/tracking")).json()
+    timeline = (await staff_client.get(f"/shipments/{created['id']}/tracking")).json()
     assert [event["status"] for event in timeline] == [
         "picked_up",
         "in_transit",
@@ -192,19 +204,23 @@ async def test_timeline_is_returned_in_chronological_order(
 
 
 async def test_deleting_a_shipment_removes_its_tracking_events(
-    auth_client: AsyncClient,
+    staff_client: AsyncClient,
 ) -> None:
-    created = await book(auth_client)
-    await auth_client.post(
+    created = await book(staff_client)
+    await staff_client.post(
         f"/shipments/{created['id']}/tracking",
         json={"status": "picked_up", "location": "Leeds depot"},
     )
-    assert (await auth_client.delete(f"/shipments/{created['id']}")).status_code == 204
-    assert (await auth_client.get(f"/shipments/{created['id']}/tracking")).status_code == 404
+    assert (await staff_client.delete(f"/shipments/{created['id']}")).status_code == 204
+    assert (
+        await staff_client.get(f"/shipments/{created['id']}/tracking")
+    ).status_code == 404
 
 
-async def test_scanning_an_unknown_shipment_returns_404(auth_client: AsyncClient) -> None:
-    response = await auth_client.post(
+async def test_scanning_an_unknown_shipment_returns_404(
+    staff_client: AsyncClient,
+) -> None:
+    response = await staff_client.post(
         "/shipments/4242/tracking",
         json={"status": "picked_up", "location": "Leeds depot"},
     )

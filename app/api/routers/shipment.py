@@ -6,7 +6,7 @@ from sqlalchemy.orm import aliased, selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api.deps import CurrentUser
+from app.api.deps import CurrentStaff, CurrentUser
 from app.api.routers.tag import TagId, require_tag
 from app.api.routers.warehouse import WarehouseId, require_warehouse
 from app.db.session import SessionDep
@@ -27,6 +27,7 @@ from app.schemas.shipment import (
     ShipmentUpdate,
     ShipmentWithCustomer,
 )
+from app.schemas.user import UserRole
 
 router = APIRouter(prefix="/shipments", tags=["shipments"])
 
@@ -34,6 +35,17 @@ ShipmentId = Annotated[
     int,
     Path(ge=1, description="Shipment reference assigned at booking."),
 ]
+
+
+def scope_for(user: User) -> User | None:
+    """The ownership restriction to apply for this caller.
+
+    Staff get None, meaning unrestricted. Expressing it as "which owner filter
+    applies" rather than sprinkling `if role is staff` through every handler
+    keeps the rule in one place, so widening or tightening it is a one-line
+    change rather than an audit.
+    """
+    return None if user.role is UserRole.staff else user
 
 
 async def require_shipment(
@@ -86,6 +98,10 @@ async def list_shipments(
         ShipmentStatus | None,
         Query(alias="status", description="Return only shipments in this state."),
     ] = None,
+    customer_id: Annotated[
+        int | None,
+        Query(ge=1, description="Staff only: narrow to one customer."),
+    ] = None,
     destination: Annotated[
         int | None,
         Query(ge=10000, le=99999, description="Filter by destination postcode."),
@@ -104,12 +120,17 @@ async def list_shipments(
     # The statement is built up conditionally and only executed at the end, so
     # the unfiltered case never loads the whole table into memory.
     #
-    # The owner filter is applied first and is not optional. Scoping in the
-    # query rather than filtering the results afterwards means another
-    # customer's rows are never loaded at all, and no future filter or
-    # pagination bug can widen it. The ?customer_id= parameter is gone: the
-    # token already says who is asking.
-    statement = select(Shipment).where(Shipment.customer_id == current_user.id)
+    # Scoping in the query rather than filtering the results afterwards means
+    # another customer's rows are never loaded at all, and no future filter or
+    # pagination bug can widen it.
+    statement = select(Shipment)
+    scope = scope_for(current_user)
+    if scope is not None:
+        statement = statement.where(Shipment.customer_id == scope.id)
+    elif customer_id is not None:
+        # Only staff may ask about somebody else's shipments, which is why the
+        # parameter exists again but is read only in this branch.
+        statement = statement.where(Shipment.customer_id == customer_id)
     if status_filter is not None:
         statement = statement.where(Shipment.status == status_filter)
     if destination is not None:
@@ -178,7 +199,7 @@ async def get_shipment(
     # Eager loaded, because serialising the nested customer and packages would
     # otherwise touch unloaded relationships and raise MissingGreenlet.
     return await require_shipment(
-        session, shipment_id, owner=current_user, with_relations=True
+        session, shipment_id, owner=scope_for(current_user), with_relations=True
     )
 
 
@@ -230,7 +251,7 @@ async def replace_shipment(
     # against the current one, and comparing against an unloaded collection
     # would trigger a lazy load.
     shipment = await require_shipment(
-        session, shipment_id, owner=current_user, with_relations=True
+        session, shipment_id, owner=scope_for(current_user), with_relations=True
     )
 
     for field, value in body.model_dump(exclude={"packages"}).items():
@@ -243,7 +264,7 @@ async def replace_shipment(
     session.add(shipment)
     await session.commit()
     return await require_shipment(
-        session, shipment_id, owner=current_user, with_relations=True
+        session, shipment_id, owner=scope_for(current_user), with_relations=True
     )
 
 
@@ -258,7 +279,7 @@ async def update_shipment(
     session: SessionDep,
     current_user: CurrentUser,
 ) -> Shipment:
-    shipment = await require_shipment(session, shipment_id, owner=current_user)
+    shipment = await require_shipment(session, shipment_id, owner=scope_for(current_user))
     # exclude_unset keeps fields the client never mentioned out of the update,
     # which is the difference between "leave it alone" and "set it to null".
     for field, value in body.model_dump(exclude_unset=True).items():
@@ -280,7 +301,7 @@ async def list_tracking_events(
     session: SessionDep,
     current_user: CurrentUser,
 ) -> list[TrackingEvent]:
-    await require_shipment(session, shipment_id, owner=current_user)
+    await require_shipment(session, shipment_id, owner=scope_for(current_user))
     statement = (
         select(TrackingEvent)
         .where(TrackingEvent.shipment_id == shipment_id)
@@ -297,15 +318,21 @@ async def list_tracking_events(
     response_model=TrackingEventRead,
     status_code=status.HTTP_201_CREATED,
     summary="Record a tracking scan",
-    responses={404: {"description": "No shipment carries that reference."}},
+    responses={
+        403: {"description": "Only staff may record scans."},
+        404: {"description": "No shipment carries that reference."},
+    },
 )
 async def add_tracking_event(
     shipment_id: ShipmentId,
     body: TrackingEventCreate,
     session: SessionDep,
-    current_user: CurrentUser,
+    # Scans are staff-only even though reading the timeline is not. A customer
+    # who can write their own scans can declare a parcel delivered, and the
+    # timeline is meant to be evidence rather than a claim.
+    current_staff: CurrentStaff,
 ) -> TrackingEvent:
-    shipment = await require_shipment(session, shipment_id, owner=current_user)
+    shipment = await require_shipment(session, shipment_id)
 
     event = TrackingEvent(shipment_id=shipment_id, **body.model_dump())
     session.add(event)
@@ -332,7 +359,7 @@ async def list_stops(
     current_user: CurrentUser,
 ) -> list[Warehouse]:
     shipment = await require_shipment(
-        session, shipment_id, owner=current_user, with_relations=True
+        session, shipment_id, owner=scope_for(current_user), with_relations=True
     )
     return shipment.stops
 
@@ -350,7 +377,7 @@ async def attach_stop(
     current_user: CurrentUser,
 ) -> list[Warehouse]:
     shipment = await require_shipment(
-        session, shipment_id, owner=current_user, with_relations=True
+        session, shipment_id, owner=scope_for(current_user), with_relations=True
     )
     warehouse = await require_warehouse(session, warehouse_id)
 
@@ -362,7 +389,7 @@ async def attach_stop(
         await session.commit()
 
     refreshed = await require_shipment(
-        session, shipment_id, owner=current_user, with_relations=True
+        session, shipment_id, owner=scope_for(current_user), with_relations=True
     )
     return refreshed.stops
 
@@ -380,7 +407,7 @@ async def detach_stop(
     current_user: CurrentUser,
 ) -> list[Warehouse]:
     shipment = await require_shipment(
-        session, shipment_id, owner=current_user, with_relations=True
+        session, shipment_id, owner=scope_for(current_user), with_relations=True
     )
     warehouse = await require_warehouse(session, warehouse_id)
 
@@ -392,7 +419,7 @@ async def detach_stop(
         await session.commit()
 
     refreshed = await require_shipment(
-        session, shipment_id, owner=current_user, with_relations=True
+        session, shipment_id, owner=scope_for(current_user), with_relations=True
     )
     return refreshed.stops
 
@@ -409,7 +436,7 @@ async def list_shipment_tags(
     current_user: CurrentUser,
 ) -> list[Tag]:
     shipment = await require_shipment(
-        session, shipment_id, owner=current_user, with_relations=True
+        session, shipment_id, owner=scope_for(current_user), with_relations=True
     )
     return shipment.tags
 
@@ -427,7 +454,7 @@ async def attach_tag(
     current_user: CurrentUser,
 ) -> list[Tag]:
     shipment = await require_shipment(
-        session, shipment_id, owner=current_user, with_relations=True
+        session, shipment_id, owner=scope_for(current_user), with_relations=True
     )
     tag = await require_tag(session, tag_id)
 
@@ -437,7 +464,7 @@ async def attach_tag(
         await session.commit()
 
     refreshed = await require_shipment(
-        session, shipment_id, owner=current_user, with_relations=True
+        session, shipment_id, owner=scope_for(current_user), with_relations=True
     )
     return refreshed.tags
 
@@ -455,7 +482,7 @@ async def detach_tag(
     current_user: CurrentUser,
 ) -> list[Tag]:
     shipment = await require_shipment(
-        session, shipment_id, owner=current_user, with_relations=True
+        session, shipment_id, owner=scope_for(current_user), with_relations=True
     )
     tag = await require_tag(session, tag_id)
 
@@ -465,7 +492,7 @@ async def detach_tag(
         await session.commit()
 
     refreshed = await require_shipment(
-        session, shipment_id, owner=current_user, with_relations=True
+        session, shipment_id, owner=scope_for(current_user), with_relations=True
     )
     return refreshed.tags
 
@@ -480,6 +507,6 @@ async def delete_shipment(
     session: SessionDep,
     current_user: CurrentUser,
 ) -> None:
-    shipment = await require_shipment(session, shipment_id, owner=current_user)
+    shipment = await require_shipment(session, shipment_id, owner=scope_for(current_user))
     await session.delete(shipment)
     await session.commit()
