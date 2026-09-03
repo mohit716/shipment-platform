@@ -1,11 +1,16 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, status
+from fastapi import APIRouter, HTTPException, Path, Query, status
 from sqlmodel import Session, select
 
 from app.db.session import SessionDep
 from app.models.shipment import Shipment
-from app.schemas.shipment import ShipmentCreate, ShipmentRead, ShipmentUpdate
+from app.schemas.shipment import (
+    ShipmentCreate,
+    ShipmentRead,
+    ShipmentStatus,
+    ShipmentUpdate,
+)
 
 router = APIRouter(prefix="/shipments", tags=["shipments"])
 
@@ -26,9 +31,29 @@ def require_shipment(session: Session, shipment_id: int) -> Shipment:
     return shipment
 
 
-@router.get("", response_model=list[ShipmentRead], summary="List every shipment")
-def list_shipments(session: SessionDep) -> list[Shipment]:
-    return list(session.exec(select(Shipment)).all())
+@router.get("", response_model=list[ShipmentRead], summary="List shipments")
+def list_shipments(
+    session: SessionDep,
+    status_filter: Annotated[
+        ShipmentStatus | None,
+        Query(alias="status", description="Return only shipments in this state."),
+    ] = None,
+    destination: Annotated[
+        int | None,
+        Query(ge=10000, le=99999, description="Filter by destination postcode."),
+    ] = None,
+    offset: Annotated[int, Query(ge=0, description="Rows to skip.")] = 0,
+    limit: Annotated[int, Query(ge=1, le=100, description="Rows to return.")] = 20,
+) -> list[Shipment]:
+    # The statement is built up conditionally and only executed at the end, so
+    # the unfiltered case never loads the whole table into memory.
+    statement = select(Shipment)
+    if status_filter is not None:
+        statement = statement.where(Shipment.status == status_filter)
+    if destination is not None:
+        statement = statement.where(Shipment.destination == destination)
+    statement = statement.order_by(Shipment.id).offset(offset).limit(limit)
+    return list(session.exec(statement).all())
 
 
 @router.get(
