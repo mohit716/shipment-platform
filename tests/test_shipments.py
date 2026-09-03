@@ -14,7 +14,12 @@ VALID_BOOKING = {
 
 async def register(client: AsyncClient, email: str = "ada@example.com") -> dict:
     response = await client.post(
-        "/users", json={"email": email, "full_name": "Ada Lovelace"}
+        "/users",
+        json={
+            "email": email,
+            "full_name": "Ada Lovelace",
+            "password": "correct-horse",
+        },
     )
     assert response.status_code == 201
     return response.json()

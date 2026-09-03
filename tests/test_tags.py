@@ -8,7 +8,14 @@ BOOKING = {"content": "ceramic dinnerware", "weight_kg": 2.4, "destination": 110
 
 async def book(client: AsyncClient, email: str = "tags@example.com") -> int:
     customer = (
-        await client.post("/users", json={"email": email, "full_name": "Ada Lovelace"})
+        await client.post(
+            "/users",
+            json={
+                "email": email,
+                "full_name": "Ada Lovelace",
+                "password": "correct-horse",
+            },
+        )
     ).json()
     shipment = (
         await client.post(

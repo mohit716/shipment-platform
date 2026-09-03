@@ -3,7 +3,11 @@ from httpx import AsyncClient
 
 pytestmark = pytest.mark.anyio
 
-VALID_USER = {"email": "ada@example.com", "full_name": "Ada Lovelace"}
+VALID_USER = {
+    "email": "ada@example.com",
+    "full_name": "Ada Lovelace",
+    "password": "correct-horse",
+}
 
 
 async def test_registration_returns_the_created_customer(client: AsyncClient) -> None:
@@ -38,7 +42,12 @@ async def test_customer_shipments_traverse_the_relationship(
     customer = (await client.post("/users", json=VALID_USER)).json()
     other = (
         await client.post(
-            "/users", json={"email": "grace@example.com", "full_name": "Grace Hopper"}
+            "/users",
+            json={
+                "email": "grace@example.com",
+                "full_name": "Grace Hopper",
+                "password": "correct-horse",
+            },
         )
     ).json()
 

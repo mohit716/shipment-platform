@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from sqlalchemy.orm import selectinload
 
+from app.core.security import hash_password
 from app.db.session import SessionDep
 from app.models.shipment import Shipment
 from app.models.user import User
@@ -37,7 +38,11 @@ async def require_user(session: AsyncSession, user_id: int) -> User:
     responses={409: {"description": "That email address is already registered."}},
 )
 async def create_user(body: UserCreate, session: SessionDep) -> User:
-    user = User(**body.model_dump())
+    # The plaintext password exists only inside this function. It is hashed
+    # before the row is built, so it never reaches the model, the session, the
+    # database, or a log line that dumps the object.
+    payload = body.model_dump(exclude={"password"})
+    user = User(**payload, hashed_password=hash_password(body.password))
     session.add(user)
     try:
         await session.commit()

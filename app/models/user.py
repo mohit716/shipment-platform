@@ -13,11 +13,7 @@ if TYPE_CHECKING:
 
 
 class User(SQLModel, table=True):
-    """A customer who books shipments.
-
-    Authentication arrives in phase 8; for now a user is just an identity a
-    shipment can belong to.
-    """
+    """A customer who books shipments and can log in."""
 
     __tablename__ = "users"
 
@@ -28,6 +24,10 @@ class User(SQLModel, table=True):
     # which is what every login will do once auth exists.
     email: str = Field(max_length=255, unique=True, index=True)
     full_name: str = Field(max_length=120)
+
+    # The hash, never the password. Nothing in the codebase reads this field
+    # except verify_password, and no response schema exposes it.
+    hashed_password: str = Field(max_length=128)
 
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),

@@ -16,5 +16,9 @@ alembic==1.19.1
 asyncpg==0.31.0
 greenlet==3.5.5
 
+# Password hashing and JSON Web Tokens.
+bcrypt==5.0.0
+PyJWT==2.13.0
+
 # SQLite driver, kept for the test suite which runs against a temporary file.
 aiosqlite==0.22.1

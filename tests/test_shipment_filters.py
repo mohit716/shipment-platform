@@ -15,7 +15,12 @@ async def routed_shipments(client: AsyncClient) -> dict[str, int]:
     """
     customer = (
         await client.post(
-            "/users", json={"email": "filter@example.com", "full_name": "Ada Lovelace"}
+            "/users",
+            json={
+                "email": "filter@example.com",
+                "full_name": "Ada Lovelace",
+                "password": "correct-horse",
+            },
         )
     ).json()
 

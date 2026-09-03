@@ -9,7 +9,12 @@ BOOKING = {"content": "ceramic dinnerware", "weight_kg": 2.4, "destination": 110
 async def setup_shipment_and_depots(client: AsyncClient) -> tuple[int, int, int]:
     customer = (
         await client.post(
-            "/users", json={"email": "route@example.com", "full_name": "Ada Lovelace"}
+            "/users",
+            json={
+                "email": "route@example.com",
+                "full_name": "Ada Lovelace",
+                "password": "correct-horse",
+            },
         )
     ).json()
     shipment = (
@@ -79,7 +84,12 @@ async def test_the_same_warehouse_serves_many_shipments(client: AsyncClient) -> 
     first_id, leeds, _ = await setup_shipment_and_depots(client)
     customer = (
         await client.post(
-            "/users", json={"email": "second@example.com", "full_name": "Grace Hopper"}
+            "/users",
+            json={
+                "email": "second@example.com",
+                "full_name": "Grace Hopper",
+                "password": "correct-horse",
+            },
         )
     ).json()
     second = (
