@@ -59,6 +59,25 @@ celery -A app.worker.celery_app beat   --loglevel=info   # publishes on a timer
 With `CELERY_ENABLED=false` the same notifications are delivered inline, so the
 API runs with nothing but Python and a database.
 
+Load a dataset the dashboard can show:
+
+```bash
+python -m app.seed
+```
+
+Safe to run twice: the second time it sees the demo accounts and stops. The
+accounts it creates:
+
+| Role | Email | Password |
+| --- | --- | --- |
+| Customer | ada@example.com | correct-horse |
+| Staff | depot@fleetline.example | correct-horse |
+
+Ada has three shipments: one in transit through Leeds and Newcastle, one just
+booked, and one already delivered. Log in at `/docs` with the OAuth2 password
+flow (`username` is the email) and `GET /shipments` to walk the same data the
+dashboard uses.
+
 The API is then available at http://127.0.0.1:8000.
 
 | Route | Purpose |
