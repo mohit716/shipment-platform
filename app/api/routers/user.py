@@ -5,8 +5,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from sqlalchemy.orm import selectinload
+
 from app.db.session import SessionDep
+from app.models.shipment import Shipment
 from app.models.user import User
+from app.schemas.shipment import ShipmentRead
 from app.schemas.user import UserCreate, UserRead
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -69,3 +73,25 @@ async def list_users(
 )
 async def get_user(user_id: UserId, session: SessionDep) -> User:
     return await require_user(session, user_id)
+
+
+@router.get(
+    "/{user_id}/shipments",
+    response_model=list[ShipmentRead],
+    summary="List a customer's shipments",
+    responses={404: {"description": "No customer carries that reference."}},
+)
+async def list_user_shipments(user_id: UserId, session: SessionDep) -> list[Shipment]:
+    # Reading user.shipments would lazily emit a query on attribute access, and
+    # a lazy load in async code raises MissingGreenlet. selectinload fetches the
+    # children up front as part of this statement instead.
+    statement = (
+        select(User).where(User.id == user_id).options(selectinload(User.shipments))
+    )
+    user = (await session.exec(statement)).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Customer {user_id} does not exist.",
+        )
+    return user.shipments

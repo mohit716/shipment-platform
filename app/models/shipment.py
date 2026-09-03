@@ -1,9 +1,14 @@
 from datetime import datetime, timezone
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import Column, DateTime
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, Relationship, SQLModel
 
 from app.schemas.shipment import ShipmentStatus
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 
 class Shipment(SQLModel, table=True):
@@ -42,3 +47,8 @@ class Shipment(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
+
+    # back_populates is what pairs the two sides. Setting shipment.customer also
+    # updates that user's shipments list in the same session, because both names
+    # describe one relationship rather than two independent ones.
+    customer: "User" = Relationship(back_populates="shipments")

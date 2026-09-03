@@ -1,7 +1,15 @@
 from datetime import datetime, timezone
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import Column, DateTime
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, Relationship, SQLModel
+
+if TYPE_CHECKING:
+    # Import only for type checkers. At runtime this would be a circular import,
+    # since shipment.py imports this module too. SQLModel resolves the string
+    # annotation lazily, so the real class is never needed here.
+    from app.models.shipment import Shipment
 
 
 class User(SQLModel, table=True):
@@ -25,3 +33,8 @@ class User(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
+
+    # Not a column. Relationship is a Python-level view over the foreign key on
+    # the other table, so user.shipments issues a query rather than reading a
+    # stored value.
+    shipments: list["Shipment"] = Relationship(back_populates="customer")
