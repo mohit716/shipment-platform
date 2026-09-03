@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      # A real PostgreSQL for the migration check. The test suite itself runs
+      # against SQLite, but migrations must be verified on the database the
+      # project actually deploys to, since that is where enum types and
+      # timezone-aware columns behave differently.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: fleetline
+          POSTGRES_PASSWORD: fleetline
+          POSTGRES_DB: fleetline
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U fleetline -d fleetline"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Apply migrations
+        # Proves the migration runs on a clean database, which catches a broken
+        # autogenerate long before a deploy does.
+        env:
+          DATABASE_URL: postgresql+asyncpg://fleetline:fleetline@localhost:5433/fleetline
+        run: alembic upgrade head
+
+      - name: Check migrations match the models
+        # Autogenerate against an up-to-date database must produce nothing. If it
+        # does, someone changed a model without writing a migration.
+        env:
+          DATABASE_URL: postgresql+asyncpg://fleetline:fleetline@localhost:5433/fleetline
+        run: alembic check
+
+      - name: Run tests
+        run: pytest
