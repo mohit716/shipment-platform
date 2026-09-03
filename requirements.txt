@@ -1,0 +1,10 @@
+# Setup:
+#   python -m venv .venv
+#   .venv\Scripts\activate          (Windows)
+#   source .venv/bin/activate       (macOS / Linux)
+#   pip install -r requirements.txt
+#
+# Direct dependencies only, pinned. Transitive packages are resolved by pip.
+
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
