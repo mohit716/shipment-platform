@@ -1,0 +1,14 @@
+[run]
+source = app
+# TYPE_CHECKING blocks are never executed; counting them as misses would
+# punish the circular-import pattern the models rely on.
+omit =
+
+[report]
+fail_under = 80
+show_missing = true
+skip_empty = true
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:

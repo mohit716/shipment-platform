@@ -55,4 +55,6 @@ jobs:
         run: alembic check
 
       - name: Run tests
+        # pytest.ini already enables coverage and fail_under=80, so a drop
+        # fails the job the same way a failing assertion does.
         run: pytest
