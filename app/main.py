@@ -1,6 +1,6 @@
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Path, status
+from fastapi import FastAPI, HTTPException, Path, status
 
 app = FastAPI(
     title="FleetLine",
@@ -26,6 +26,17 @@ shipments: dict[int, dict[str, Any]] = {
         "status": "placed",
     },
 }
+
+
+def require_shipment(shipment_id: int) -> dict[str, Any]:
+    """Return a shipment or abort the request with 404."""
+    shipment = shipments.get(shipment_id)
+    if shipment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Shipment {shipment_id} does not exist.",
+        )
+    return shipment
 
 
 @app.get("/")
@@ -58,8 +69,8 @@ def get_shipment(
             description="Five digit shipment reference.",
         ),
     ],
-) -> dict[str, Any] | None:
-    return shipments.get(shipment_id)
+) -> dict[str, Any]:
+    return require_shipment(shipment_id)
 
 
 @app.post(
@@ -80,6 +91,7 @@ def create_shipment(body: dict[str, Any]) -> dict[str, Any]:
 def replace_shipment(shipment_id: int, body: dict[str, Any]) -> dict[str, Any]:
     # PUT is a full replacement: the stored record becomes exactly what was sent,
     # so any field the client omits is dropped.
+    require_shipment(shipment_id)
     shipments[shipment_id] = {"id": shipment_id, **body}
     return shipments[shipment_id]
 
@@ -92,8 +104,9 @@ def replace_shipment(shipment_id: int, body: dict[str, Any]) -> dict[str, Any]:
 def update_shipment(shipment_id: int, body: dict[str, Any]) -> dict[str, Any]:
     # PATCH merges: only the keys present in the body are touched, which is what
     # a status update from a warehouse scanner actually needs.
-    shipments[shipment_id].update(body)
-    return shipments[shipment_id]
+    shipment = require_shipment(shipment_id)
+    shipment.update(body)
+    return shipment
 
 
 @app.delete(
