@@ -26,6 +26,21 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:8-alpine
+    container_name: fleetline-redis
+    ports:
+      # 6380 for the same reason the database uses 5433: a Redis already
+      # running on the host owns 6379.
+      - "6380:6379"
+    # No volume on purpose. Redis is the message broker here, not a store of
+    # record; anything that must survive a restart belongs in PostgreSQL.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   # A named volume, so data survives `docker compose down`. Removing it takes
   # an explicit `docker compose down -v`.

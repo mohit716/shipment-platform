@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     # a paid account and a verified sender before it will deliver anything.
     sms_enabled: bool = False
 
+    # Matches the redis service in docker-compose.yml. Database 0 carries the
+    # queue and 1 the results, so flushing one does not destroy the other.
+    celery_broker_url: str = "redis://localhost:6380/0"
+    celery_result_backend: str = "redis://localhost:6380/1"
+
 
 @lru_cache
 def get_settings() -> Settings:
