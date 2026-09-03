@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 
 app = FastAPI(
     title="FleetLine",
@@ -10,3 +10,13 @@ app = FastAPI(
 @app.get("/")
 def read_root() -> dict[str, str]:
     return {"service": "FleetLine", "docs": "/docs"}
+
+
+@app.get(
+    "/health",
+    status_code=status.HTTP_200_OK,
+    tags=["system"],
+    summary="Liveness probe",
+)
+def health_check() -> dict[str, str]:
+    return {"status": "ok", "version": app.version}
