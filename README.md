@@ -39,6 +39,11 @@ python -m venv .venv
 source .venv/bin/activate       # macOS / Linux
 
 pip install -r requirements.txt
+cp .env.example .env            # then set SECRET_KEY
+
+docker compose up -d db         # PostgreSQL on port 5433
+alembic upgrade head            # build the schema
+
 uvicorn app.main:app --reload
 ```
 
@@ -51,11 +56,60 @@ The API is then available at http://127.0.0.1:8000.
 | `/docs` | Interactive Swagger UI |
 | `/redoc` | Reference documentation |
 
+## Authentication
+
+Every route except registration, login and the system probes needs a bearer
+token.
+
+```bash
+# 1. Register. New accounts are always customers.
+curl -X POST http://127.0.0.1:8000/users \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"ada@example.com","full_name":"Ada Lovelace","password":"correct-horse"}'
+
+# 2. Exchange credentials for a token. Form encoded, as OAuth2 specifies.
+curl -X POST http://127.0.0.1:8000/auth/token \
+  -d 'username=ada@example.com&password=correct-horse'
+
+# 3. Send it on every request.
+curl http://127.0.0.1:8000/shipments -H 'Authorization: Bearer <token>'
+```
+
+In Swagger UI, use the **Authorize** button instead; it drives the same flow.
+
+### What each role may do
+
+| | Customer | Staff |
+| --- | --- | --- |
+| Book, amend and cancel shipments | Own only | Any |
+| Read shipments and timelines | Own only | Any |
+| Record a tracking scan | No | Yes |
+| Read depots and handling labels | Yes | Yes |
+| Create depots and handling labels | No | Yes |
+| Browse the customer list | No | Yes |
+
+Reading somebody else's shipment answers `404`, not `403`, so the API cannot be
+used to discover which references exist. Being refused a staff-only route
+answers `403`, because there the caller is known and the route is not a secret.
+
+Roles are not settable at registration and there is no promotion endpoint;
+staff are promoted directly in the database.
+
 ## Project layout
 
 ```
 app/
   main.py        # application instance and system routes
+  api/
+    deps.py      # authentication and role dependencies
+    routers/     # one module per resource
+  core/          # settings, password hashing, tokens
+  db/            # engine and session factory
+  models/        # SQLModel tables
+  schemas/       # Pydantic request and response models
+  services/      # carrier rate lookups
+alembic/         # migrations
+tests/           # pytest suite
 requirements.txt # pinned direct dependencies
 ```
 
