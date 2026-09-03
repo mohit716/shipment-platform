@@ -69,6 +69,18 @@ class ShipmentCreate(ShipmentBase):
         description="Current lifecycle state.",
     )
 
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "content": "ceramic dinnerware, double boxed",
+                    "weight_kg": 2.4,
+                    "destination": 11001,
+                }
+            ]
+        }
+    }
+
 
 class ShipmentUpdate(BaseModel):
     """A partial update, so every field is optional.

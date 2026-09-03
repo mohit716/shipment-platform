@@ -47,7 +47,12 @@ def list_shipments() -> list[dict[str, Any]]:
     return list(shipments.values())
 
 
-@router.get("/{shipment_id}", response_model=ShipmentRead, summary="Read one shipment")
+@router.get(
+    "/{shipment_id}",
+    response_model=ShipmentRead,
+    summary="Read one shipment",
+    responses={404: {"description": "No shipment carries that reference."}},
+)
 def get_shipment(shipment_id: ShipmentId) -> dict[str, Any]:
     return require_shipment(shipment_id)
 
@@ -57,6 +62,10 @@ def get_shipment(shipment_id: ShipmentId) -> dict[str, Any]:
     response_model=ShipmentRead,
     status_code=status.HTTP_201_CREATED,
     summary="Book a shipment",
+    response_description="The booked shipment, including its assigned reference.",
+    responses={
+        422: {"description": "The parcel breaches a weight, size or content rule."}
+    },
 )
 def create_shipment(body: ShipmentCreate) -> dict[str, Any]:
     new_id = max(shipments) + 1
