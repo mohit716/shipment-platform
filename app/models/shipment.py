@@ -5,12 +5,14 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Column, DateTime
 from sqlmodel import Field, Relationship, SQLModel
 
+from app.models.warehouse import ShipmentWarehouseLink
 from app.schemas.shipment import ShipmentStatus
 
 if TYPE_CHECKING:
     from app.models.package import Package
     from app.models.tracking import TrackingEvent
     from app.models.user import User
+    from app.models.warehouse import Warehouse
 
 
 class Shipment(SQLModel, table=True):
@@ -73,4 +75,12 @@ class Shipment(SQLModel, table=True):
         sa_relationship_kwargs={
             "order_by": "(TrackingEvent.recorded_at, TrackingEvent.id)"
         },
+    )
+
+    # Many-to-many: a shipment passes through several warehouses, and a
+    # warehouse handles many shipments. link_model names the association table;
+    # no foreign key appears on either side.
+    stops: list["Warehouse"] = Relationship(
+        back_populates="shipments",
+        link_model=ShipmentWarehouseLink,
     )

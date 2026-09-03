@@ -13,7 +13,7 @@ from app.core.config import settings
 # Importing the models is what populates SQLModel.metadata. Without this,
 # autogenerate sees an empty schema and cheerfully writes a migration that
 # drops every table.
-from app.models import package, shipment, tracking, user  # noqa: F401
+from app.models import package, shipment, tracking, user, warehouse  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
