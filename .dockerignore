@@ -1,0 +1,17 @@
+.venv
+venv
+.git
+.gitignore
+.github
+.pytest_cache
+.coverage
+htmlcov
+notes
+frontend
+tests
+__pycache__
+*.pyc
+*.db
+.env
+worker.log
+worker.err

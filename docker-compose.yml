@@ -1,7 +1,23 @@
-# Local development dependencies. The API itself still runs on the host with
-# uvicorn; only the services that are painful to install natively live here.
-# Phase 15 adds the API, worker and frontend to this file.
+# Full local stack: database, broker, API, worker, scheduler, dashboard.
 name: fleetline
+
+x-app-environment: &app-environment
+  APP_NAME: FleetLine
+  ENVIRONMENT: development
+  DEBUG: "false"
+  DATABASE_URL: postgresql+asyncpg://fleetline:fleetline@db:5432/fleetline
+  DATABASE_ECHO: "false"
+  SECRET_KEY: compose-secret-change-me-not-for-production
+  JWT_ALGORITHM: HS256
+  ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+  BCRYPT_ROUNDS: "12"
+  EMAIL_BACKEND: console
+  CELERY_ENABLED: "true"
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  FRONTEND_URL: http://localhost:8080
+  TRUST_PROXY_HEADERS: "true"
+  CORS_ORIGINS: '["http://localhost:8080","http://127.0.0.1:8080"]'
 
 services:
   db:
@@ -12,15 +28,10 @@ services:
       POSTGRES_PASSWORD: fleetline
       POSTGRES_DB: fleetline
     ports:
-      # Exposed on 5433 so it cannot collide with a PostgreSQL already
-      # installed on the host, which would otherwise own 5432.
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      # pg_isready returns success only once the server accepts connections.
-      # Without this, dependent services start while the database is still
-      # initialising and fail their first query.
       test: ["CMD-SHELL", "pg_isready -U fleetline -d fleetline"]
       interval: 5s
       timeout: 5s
@@ -30,18 +41,55 @@ services:
     image: redis:8-alpine
     container_name: fleetline-redis
     ports:
-      # 6380 for the same reason the database uses 5433: a Redis already
-      # running on the host owns 6379.
       - "6380:6379"
-    # No volume on purpose. Redis is the message broker here, not a store of
-    # record; anything that must survive a restart belongs in PostgreSQL.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
 
+  api:
+    build: .
+    container_name: fleetline-api
+    environment:
+      <<: *app-environment
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    container_name: fleetline-worker
+    command: celery -A app.worker.celery_app worker --loglevel=info
+    environment:
+      <<: *app-environment
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    build: .
+    container_name: fleetline-beat
+    command: celery -A app.worker.celery_app beat --loglevel=info
+    environment:
+      <<: *app-environment
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  web:
+    build: ./frontend
+    container_name: fleetline-web
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
 volumes:
-  # A named volume, so data survives `docker compose down`. Removing it takes
-  # an explicit `docker compose down -v`.
   postgres_data:
