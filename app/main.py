@@ -60,3 +60,17 @@ def get_shipment(
     ],
 ) -> dict[str, Any] | None:
     return shipments.get(shipment_id)
+
+
+@app.post(
+    "/shipments",
+    status_code=status.HTTP_201_CREATED,
+    tags=["shipments"],
+    summary="Book a shipment",
+)
+def create_shipment(body: dict[str, Any]) -> dict[str, Any]:
+    # Accepting a bare dict means anything at all is accepted: missing fields,
+    # a weight of "heavy", unknown keys. Pydantic models fix this in phase 2.
+    new_id = max(shipments) + 1
+    shipments[new_id] = {"id": new_id, **body}
+    return shipments[new_id]
