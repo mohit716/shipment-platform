@@ -20,8 +20,8 @@ class ShipmentStatus(str, Enum):
     exception = "exception"
 
 
-class Shipment(BaseModel):
-    """A shipment as it travels over the wire.
+class ShipmentBase(BaseModel):
+    """Fields common to every representation of a shipment.
 
     Field carries the business rules: a carrier that cannot lift more than 25 kg
     and a destination that must be a five digit postcode are facts about the
@@ -43,7 +43,32 @@ class Shipment(BaseModel):
         le=99999,
         description="Five digit destination postcode.",
     )
+
+
+class ShipmentCreate(ShipmentBase):
+    """What a client may send when booking. Note the absence of id."""
+
     status: ShipmentStatus = Field(
         default=ShipmentStatus.placed,
         description="Current lifecycle state.",
     )
+
+
+class ShipmentUpdate(BaseModel):
+    """A partial update, so every field is optional.
+
+    None means the client did not mention the field, which is why handlers must
+    use exclude_unset rather than treating None as a value to store.
+    """
+
+    content: str | None = Field(default=None, min_length=3, max_length=120)
+    weight_kg: float | None = Field(default=None, gt=0, le=25)
+    destination: int | None = Field(default=None, ge=10000, le=99999)
+    status: ShipmentStatus | None = None
+
+
+class ShipmentRead(ShipmentBase):
+    """What the API returns. The server owns id, so it appears only here."""
+
+    id: int
+    status: ShipmentStatus

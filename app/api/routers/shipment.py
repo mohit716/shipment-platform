@@ -2,7 +2,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Path, status
 
-from app.schemas.shipment import Shipment
+from app.schemas.shipment import ShipmentCreate, ShipmentRead, ShipmentUpdate
 
 router = APIRouter(prefix="/shipments", tags=["shipments"])
 
@@ -42,38 +42,51 @@ def require_shipment(shipment_id: int) -> dict[str, Any]:
     return shipment
 
 
-@router.get("", summary="List every shipment")
+@router.get("", response_model=list[ShipmentRead], summary="List every shipment")
 def list_shipments() -> list[dict[str, Any]]:
     return list(shipments.values())
 
 
-@router.get("/{shipment_id}", summary="Read one shipment")
+@router.get("/{shipment_id}", response_model=ShipmentRead, summary="Read one shipment")
 def get_shipment(shipment_id: ShipmentId) -> dict[str, Any]:
     return require_shipment(shipment_id)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED, summary="Book a shipment")
-def create_shipment(body: Shipment) -> dict[str, Any]:
+@router.post(
+    "",
+    response_model=ShipmentRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Book a shipment",
+)
+def create_shipment(body: ShipmentCreate) -> dict[str, Any]:
     new_id = max(shipments) + 1
     shipments[new_id] = {"id": new_id, **body.model_dump()}
     return shipments[new_id]
 
 
-@router.put("/{shipment_id}", summary="Replace a shipment")
-def replace_shipment(shipment_id: ShipmentId, body: Shipment) -> dict[str, Any]:
+@router.put(
+    "/{shipment_id}",
+    response_model=ShipmentRead,
+    summary="Replace a shipment",
+)
+def replace_shipment(shipment_id: ShipmentId, body: ShipmentCreate) -> dict[str, Any]:
     # PUT is a full replacement: the stored record becomes exactly what was sent,
-    # so any field the client omits is dropped.
+    # so any field the client omits falls back to the schema default.
     require_shipment(shipment_id)
     shipments[shipment_id] = {"id": shipment_id, **body.model_dump()}
     return shipments[shipment_id]
 
 
-@router.patch("/{shipment_id}", summary="Update part of a shipment")
-def update_shipment(shipment_id: ShipmentId, body: dict[str, Any]) -> dict[str, Any]:
-    # PATCH still takes a raw dict: a partial update needs every field optional,
-    # which is a separate schema. Commit 18 introduces it.
+@router.patch(
+    "/{shipment_id}",
+    response_model=ShipmentRead,
+    summary="Update part of a shipment",
+)
+def update_shipment(shipment_id: ShipmentId, body: ShipmentUpdate) -> dict[str, Any]:
     shipment = require_shipment(shipment_id)
-    shipment.update(body)
+    # exclude_unset keeps fields the client never mentioned out of the update,
+    # which is the difference between "leave it alone" and "set it to null".
+    shipment.update(body.model_dump(exclude_unset=True))
     return shipment
 
 
