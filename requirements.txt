@@ -25,6 +25,8 @@ python-multipart==0.0.32
 # Background workers and their broker.
 celery==5.6.3
 redis==8.1.0
+# Synchronous driver for the worker; the API uses asyncpg.
+psycopg[binary]==3.3.5
 
 # SQLite driver, kept for the test suite which runs against a temporary file.
 aiosqlite==0.22.1

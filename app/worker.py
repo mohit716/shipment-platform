@@ -12,7 +12,7 @@ celery_app = Celery(
     # settings because they are separate jobs: the broker delivers work, the
     # backend keeps answers.
     backend=settings.celery_result_backend,
-    include=["app.tasks.notifications"],
+    include=["app.tasks.notifications", "app.tasks.maintenance"],
 )
 
 celery_app.conf.update(

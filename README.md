@@ -47,6 +47,18 @@ alembic upgrade head            # build the schema
 uvicorn app.main:app --reload
 ```
 
+Background work is optional. To run it, start Redis and set
+`CELERY_ENABLED=true`, then in two more terminals:
+
+```bash
+docker compose up -d redis
+celery -A app.worker.celery_app worker --loglevel=info   # does the work
+celery -A app.worker.celery_app beat   --loglevel=info   # publishes on a timer
+```
+
+With `CELERY_ENABLED=false` the same notifications are delivered inline, so the
+API runs with nothing but Python and a database.
+
 The API is then available at http://127.0.0.1:8000.
 
 | Route | Purpose |
