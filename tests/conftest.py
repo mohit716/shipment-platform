@@ -14,6 +14,7 @@ from app.db.session import get_session
 from app.main import app
 from app.models.user import User
 from app.schemas.user import UserRole
+from app.services.notifications import MemoryNotifier, get_notifier
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -64,9 +65,17 @@ async def session_factory_fixture(tmp_path: Path) -> AsyncIterator[object]:
     await engine.dispose()
 
 
+@pytest.fixture(name="outbox")
+def outbox_fixture() -> MemoryNotifier:
+    """Collects every notification the application tries to send."""
+    return MemoryNotifier()
+
+
 @pytest.fixture(name="client")
-async def client_fixture(session_factory) -> AsyncIterator[AsyncClient]:
-    """An HTTP client wired to the throwaway database."""
+async def client_fixture(
+    session_factory, outbox: MemoryNotifier
+) -> AsyncIterator[AsyncClient]:
+    """An HTTP client wired to the throwaway database and a recording notifier."""
 
     async def session_override() -> AsyncIterator[AsyncSession]:
         async with session_factory() as session:
@@ -76,6 +85,8 @@ async def client_fixture(session_factory) -> AsyncIterator[AsyncClient]:
     # database. This is the payoff for injecting the session in commit 25: no
     # route needs to know it is being tested.
     app.dependency_overrides[get_session] = session_override
+    # Same trick as the session: the routes are unaware they are being tested.
+    app.dependency_overrides[get_notifier] = lambda: outbox
 
     # ASGITransport calls the application in-process. There is no socket, no
     # port and no server, so the suite stays fast and needs nothing running.

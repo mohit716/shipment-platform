@@ -1,12 +1,12 @@
 import time
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Path, Query, status
 from sqlalchemy.orm import aliased, selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api.deps import CurrentStaff, CurrentUser
+from app.api.deps import CurrentStaff, CurrentUser, NotifierDep
 from app.api.routers.tag import TagId, require_tag
 from app.api.routers.warehouse import WarehouseId, require_warehouse
 from app.db.session import SessionDep
@@ -28,6 +28,7 @@ from app.schemas.shipment import (
     ShipmentWithCustomer,
 )
 from app.schemas.user import UserRole
+from app.services.notifications import Notification
 
 router = APIRouter(prefix="/shipments", tags=["shipments"])
 
@@ -217,6 +218,8 @@ async def create_shipment(
     body: ShipmentCreate,
     session: SessionDep,
     current_user: CurrentUser,
+    background: BackgroundTasks,
+    notifier: NotifierDep,
 ) -> Shipment:
     # The owner comes from the token, never from the request body. When the
     # client supplied customer_id, anyone could book a shipment in somebody
@@ -233,6 +236,23 @@ async def create_shipment(
     # The id was assigned by the database during commit, so the in-memory
     # object is stale until it is refreshed from the row.
     await session.refresh(shipment)
+
+    # Queued after the commit and run after the response is sent. Sending
+    # inline would make the caller wait on a mail server, and sending before
+    # the commit would risk confirming a booking that then failed to save.
+    background.add_task(
+        notifier.send,
+        Notification(
+            channel="email",
+            recipient=current_user.email,
+            subject=f"FleetLine booking {shipment.id} confirmed",
+            body=(
+                f"Hello {current_user.full_name},\n\n"
+                f"Your shipment of {shipment.content} to {shipment.destination} "
+                f"is booked under reference {shipment.id}.\n"
+            ),
+        ),
+    )
     return shipment
 
 

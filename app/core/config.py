@@ -48,6 +48,15 @@ class Settings(BaseSettings):
     # of throwaway passwords, so the tests turn it down to the minimum.
     bcrypt_rounds: int = 12
 
+    # console logs messages instead of sending them, which is what development
+    # wants: a shipping demo that emails strangers is a bad afternoon.
+    email_backend: str = "console"
+    email_from: str = "no-reply@fleetline.example"
+    smtp_host: str = "localhost"
+    smtp_port: int = 1025
+    smtp_username: str = ""
+    smtp_password: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -7,6 +7,7 @@ from app.core.tokens import TokenError, read_access_token
 from app.db.session import SessionDep
 from app.models.user import User
 from app.schemas.user import UserRole
+from app.services.notifications import Notifier, get_notifier
 
 # tokenUrl is documentation, not routing: it tells OpenAPI which endpoint hands
 # out tokens so Swagger UI's Authorize button knows where to post credentials.
@@ -70,3 +71,7 @@ async def get_current_staff(current_user: CurrentUser) -> User:
 
 
 CurrentStaff = Annotated[User, Depends(get_current_staff)]
+
+# Injected rather than imported, so a test can swap in a notifier that records
+# messages instead of sending them, exactly as it swaps the database session.
+NotifierDep = Annotated[Notifier, Depends(get_notifier)]
