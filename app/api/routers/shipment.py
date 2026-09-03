@@ -2,6 +2,7 @@ import time
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -14,6 +15,7 @@ from app.schemas.shipment import (
     ShipmentRead,
     ShipmentStatus,
     ShipmentUpdate,
+    ShipmentWithCustomer,
 )
 
 router = APIRouter(prefix="/shipments", tags=["shipments"])
@@ -92,12 +94,26 @@ async def compare_carrier_rates(
 
 @router.get(
     "/{shipment_id}",
-    response_model=ShipmentRead,
+    response_model=ShipmentWithCustomer,
     summary="Read one shipment",
     responses={404: {"description": "No shipment carries that reference."}},
 )
 async def get_shipment(shipment_id: ShipmentId, session: SessionDep) -> Shipment:
-    return await require_shipment(session, shipment_id)
+    # One statement, one round trip. Without the eager load, serialising the
+    # nested customer would touch shipment.customer and trigger a lazy query,
+    # which raises MissingGreenlet under async.
+    statement = (
+        select(Shipment)
+        .where(Shipment.id == shipment_id)
+        .options(selectinload(Shipment.customer))
+    )
+    shipment = (await session.exec(statement)).first()
+    if shipment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Shipment {shipment_id} does not exist.",
+        )
+    return shipment
 
 
 @router.post(

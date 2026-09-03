@@ -97,12 +97,30 @@ class ShipmentUpdate(BaseModel):
     status: ShipmentStatus | None = None
 
 
+class CustomerSummary(BaseModel):
+    """The slice of a customer that is safe to embed in a shipment.
+
+    Deliberately not UserRead. A nested object should expose the minimum the
+    caller needs, so that adding a field to the user schema later cannot widen
+    what every shipment response leaks.
+    """
+
+    id: int
+    full_name: str
+
+
 class ShipmentRead(ShipmentBase):
     """What the API returns. The server owns id, so it appears only here."""
 
     id: int
     customer_id: int
     status: ShipmentStatus
+
+
+class ShipmentWithCustomer(ShipmentRead):
+    """A shipment with its customer embedded, for the detail view."""
+
+    customer: CustomerSummary
     estimated_delivery: datetime | None = Field(
         default=None,
         description="Derived from weight; heavier parcels move by road.",

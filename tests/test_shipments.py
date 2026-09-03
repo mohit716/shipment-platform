@@ -66,6 +66,26 @@ async def test_listing_starts_empty_then_reflects_bookings(
     assert len((await client.get("/shipments")).json()) == 2
 
 
+async def test_detail_view_embeds_the_customer(client: AsyncClient) -> None:
+    customer = await register(client, "embedded@example.com")
+    created = await book(client, customer_id=customer["id"])
+
+    response = await client.get(f"/shipments/{created['id']}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["customer"]["id"] == customer["id"]
+    assert payload["customer"]["full_name"] == "Ada Lovelace"
+    # The nested summary is deliberately narrow: no email, no created_at.
+    assert "email" not in payload["customer"]
+
+
+async def test_list_view_does_not_embed_the_customer(client: AsyncClient) -> None:
+    await book(client)
+    row = (await client.get("/shipments")).json()[0]
+    assert "customer_id" in row
+    assert "customer" not in row
+
+
 async def test_reading_a_missing_shipment_returns_404(client: AsyncClient) -> None:
     response = await client.get("/shipments/4242")
     assert response.status_code == 404
