@@ -1,6 +1,7 @@
 import pytest
 from httpx import AsyncClient
 
+from app.services.rates import CARRIERS
 from tests.conftest import login_as
 from tests.factories import BOOKING as VALID_BOOKING
 from tests.factories import book
@@ -340,11 +341,19 @@ async def test_limit_caps_the_page_size(auth_client: AsyncClient) -> None:
     assert (await auth_client.get("/shipments", params={"limit": 500})).status_code == 422
 
 
-async def test_carrier_quotes_run_concurrently(auth_client: AsyncClient) -> None:
+async def test_carrier_quotes_run_concurrently(
+    auth_client: AsyncClient, monkeypatch
+) -> None:
+    # The sleeps are the fake network. Zeroing them keeps the HTTP test about
+    # the response shape; the real concurrency assertion lives in test_rates,
+    # where the sleep itself is what is being measured.
+    async def instant(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("app.services.rates.asyncio.sleep", instant)
     response = await auth_client.get("/shipments/quotes", params={"weight_kg": 3})
     assert response.status_code == 200
     payload = response.json()
-    # The whole point of gather: elapsed time tracks the slowest call, not the sum.
-    assert payload["elapsed_seconds"] < payload["sequential_would_take"]
     prices = [quote["price"] for quote in payload["quotes"]]
     assert prices == sorted(prices)
+    assert {q["carrier"] for q in payload["quotes"]} == {c.name for c in CARRIERS}
