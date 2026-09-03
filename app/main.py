@@ -46,3 +46,8 @@ def health_check() -> dict[str, str]:
 @app.get("/shipments", tags=["shipments"], summary="List every shipment")
 def list_shipments() -> list[dict[str, Any]]:
     return list(shipments.values())
+
+
+@app.get("/shipments/{shipment_id}", tags=["shipments"], summary="Read one shipment")
+def get_shipment(shipment_id: int) -> dict[str, Any] | None:
+    return shipments.get(shipment_id)
