@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, status
 from sqlmodel import Session, select
 
-from app.db.session import engine
+from app.db.session import SessionDep
 from app.models.shipment import Shipment
 from app.schemas.shipment import ShipmentCreate, ShipmentRead, ShipmentUpdate
 
@@ -27,9 +27,8 @@ def require_shipment(session: Session, shipment_id: int) -> Shipment:
 
 
 @router.get("", response_model=list[ShipmentRead], summary="List every shipment")
-def list_shipments() -> list[Shipment]:
-    with Session(engine) as session:
-        return list(session.exec(select(Shipment)).all())
+def list_shipments(session: SessionDep) -> list[Shipment]:
+    return list(session.exec(select(Shipment)).all())
 
 
 @router.get(
@@ -38,9 +37,8 @@ def list_shipments() -> list[Shipment]:
     summary="Read one shipment",
     responses={404: {"description": "No shipment carries that reference."}},
 )
-def get_shipment(shipment_id: ShipmentId) -> Shipment:
-    with Session(engine) as session:
-        return require_shipment(session, shipment_id)
+def get_shipment(shipment_id: ShipmentId, session: SessionDep) -> Shipment:
+    return require_shipment(session, shipment_id)
 
 
 @router.post(
@@ -53,15 +51,14 @@ def get_shipment(shipment_id: ShipmentId) -> Shipment:
         422: {"description": "The parcel breaches a weight, size or content rule."}
     },
 )
-def create_shipment(body: ShipmentCreate) -> Shipment:
-    with Session(engine) as session:
-        shipment = Shipment(**body.model_dump())
-        session.add(shipment)
-        session.commit()
-        # The id was assigned by the database during commit, so the in-memory
-        # object is stale until it is refreshed from the row.
-        session.refresh(shipment)
-        return shipment
+def create_shipment(body: ShipmentCreate, session: SessionDep) -> Shipment:
+    shipment = Shipment(**body.model_dump())
+    session.add(shipment)
+    session.commit()
+    # The id was assigned by the database during commit, so the in-memory
+    # object is stale until it is refreshed from the row.
+    session.refresh(shipment)
+    return shipment
 
 
 @router.put(
@@ -69,15 +66,18 @@ def create_shipment(body: ShipmentCreate) -> Shipment:
     response_model=ShipmentRead,
     summary="Replace a shipment",
 )
-def replace_shipment(shipment_id: ShipmentId, body: ShipmentCreate) -> Shipment:
-    with Session(engine) as session:
-        shipment = require_shipment(session, shipment_id)
-        for field, value in body.model_dump().items():
-            setattr(shipment, field, value)
-        session.add(shipment)
-        session.commit()
-        session.refresh(shipment)
-        return shipment
+def replace_shipment(
+    shipment_id: ShipmentId,
+    body: ShipmentCreate,
+    session: SessionDep,
+) -> Shipment:
+    shipment = require_shipment(session, shipment_id)
+    for field, value in body.model_dump().items():
+        setattr(shipment, field, value)
+    session.add(shipment)
+    session.commit()
+    session.refresh(shipment)
+    return shipment
 
 
 @router.patch(
@@ -85,17 +85,20 @@ def replace_shipment(shipment_id: ShipmentId, body: ShipmentCreate) -> Shipment:
     response_model=ShipmentRead,
     summary="Update part of a shipment",
 )
-def update_shipment(shipment_id: ShipmentId, body: ShipmentUpdate) -> Shipment:
-    with Session(engine) as session:
-        shipment = require_shipment(session, shipment_id)
-        # exclude_unset keeps fields the client never mentioned out of the update,
-        # which is the difference between "leave it alone" and "set it to null".
-        for field, value in body.model_dump(exclude_unset=True).items():
-            setattr(shipment, field, value)
-        session.add(shipment)
-        session.commit()
-        session.refresh(shipment)
-        return shipment
+def update_shipment(
+    shipment_id: ShipmentId,
+    body: ShipmentUpdate,
+    session: SessionDep,
+) -> Shipment:
+    shipment = require_shipment(session, shipment_id)
+    # exclude_unset keeps fields the client never mentioned out of the update,
+    # which is the difference between "leave it alone" and "set it to null".
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(shipment, field, value)
+    session.add(shipment)
+    session.commit()
+    session.refresh(shipment)
+    return shipment
 
 
 @router.delete(
@@ -103,8 +106,7 @@ def update_shipment(shipment_id: ShipmentId, body: ShipmentUpdate) -> Shipment:
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Cancel a shipment",
 )
-def delete_shipment(shipment_id: ShipmentId) -> None:
-    with Session(engine) as session:
-        shipment = require_shipment(session, shipment_id)
-        session.delete(shipment)
-        session.commit()
+def delete_shipment(shipment_id: ShipmentId, session: SessionDep) -> None:
+    shipment = require_shipment(session, shipment_id)
+    session.delete(shipment)
+    session.commit()

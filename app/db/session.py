@@ -1,4 +1,8 @@
-from sqlmodel import SQLModel, create_engine
+from collections.abc import Iterator
+from typing import Annotated
+
+from fastapi import Depends
+from sqlmodel import Session, SQLModel, create_engine
 
 # SQLite keeps the first database commits dependency free: the whole database is
 # one file next to the code. PostgreSQL replaces this in phase 5, and the only
@@ -26,3 +30,19 @@ def create_db_and_tables() -> None:
     from app.models import shipment  # noqa: F401  (registers the table)
 
     SQLModel.metadata.create_all(engine)
+
+
+def get_session() -> Iterator[Session]:
+    """Yield a session for one request, then close it.
+
+    A dependency that yields runs its teardown after the response is produced,
+    so the session is guaranteed to close even when the handler raises. Tests
+    override this to point at a throwaway database.
+    """
+    with Session(engine) as session:
+        yield session
+
+
+# Alias so handlers read as `session: SessionDep` rather than repeating the
+# Annotated/Depends pair on every route.
+SessionDep = Annotated[Session, Depends(get_session)]
