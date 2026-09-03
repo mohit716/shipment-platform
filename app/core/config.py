@@ -1,6 +1,10 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEV_SECRET = "dev-only-secret-change-me-in-production"
+COMPOSE_SECRET = "compose-secret-change-me-not-for-production"
 
 
 class Settings(BaseSettings):
@@ -103,6 +107,28 @@ class Settings(BaseSettings):
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
+
+    @model_validator(mode="after")
+    def refuse_unsafe_production(self) -> "Settings":
+        """Production must not boot on the development defaults.
+
+        A known SECRET_KEY means anyone can mint a token for any account. Debug
+        True echoes exception text that can name tables. Those are fine on a
+        laptop and catastrophic on the internet, so the process refuses to
+        start rather than hoping someone notices.
+        """
+        if self.environment != "production":
+            return self
+        problems: list[str] = []
+        if self.secret_key in {DEV_SECRET, COMPOSE_SECRET} or len(self.secret_key) < 32:
+            problems.append("SECRET_KEY must be a unique value at least 32 characters long")
+        if self.debug:
+            problems.append("DEBUG must be false")
+        if self.database_echo:
+            problems.append("DATABASE_ECHO must be false")
+        if problems:
+            raise ValueError("Refusing to start in production: " + "; ".join(problems))
+        return self
 
 
 @lru_cache
