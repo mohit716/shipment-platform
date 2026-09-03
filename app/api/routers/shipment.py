@@ -2,7 +2,7 @@ import time
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -12,9 +12,9 @@ from app.api.routers.warehouse import WarehouseId, require_warehouse
 from app.db.session import SessionDep
 from app.models.package import Package
 from app.models.shipment import Shipment
-from app.models.tag import Tag
+from app.models.tag import ShipmentTagLink, Tag
 from app.models.tracking import TrackingEvent
-from app.models.warehouse import Warehouse
+from app.models.warehouse import ShipmentWarehouseLink, Warehouse
 from app.schemas.tag import TagRead
 from app.schemas.tracking import TrackingEventCreate, TrackingEventRead
 from app.schemas.warehouse import WarehouseRead
@@ -86,6 +86,14 @@ async def list_shipments(
         int | None,
         Query(ge=10000, le=99999, description="Filter by destination postcode."),
     ] = None,
+    tag: Annotated[
+        list[str] | None,
+        Query(description="Only shipments carrying every one of these labels."),
+    ] = None,
+    depot: Annotated[
+        str | None,
+        Query(description="Only shipments routed through this depot code."),
+    ] = None,
     offset: Annotated[int, Query(ge=0, description="Rows to skip.")] = 0,
     limit: Annotated[int, Query(ge=1, le=100, description="Rows to return.")] = 20,
 ) -> list[Shipment]:
@@ -98,6 +106,28 @@ async def list_shipments(
         statement = statement.where(Shipment.customer_id == customer_id)
     if destination is not None:
         statement = statement.where(Shipment.destination == destination)
+
+    if depot is not None:
+        # Two hops to cross a many-to-many: shipments to the link table, then
+        # link table to warehouses. Filtering on warehouse.code rather than an
+        # id keeps the URL readable: ?depot=LDS1.
+        statement = statement.join(ShipmentWarehouseLink).join(Warehouse).where(
+            Warehouse.code == depot.strip().upper()
+        )
+
+    if tag:
+        # AND, not OR. A separate aliased join per label means a row survives
+        # only if it matches all of them; a single join with IN would return
+        # shipments carrying any one of them, and would also duplicate rows.
+        for name in tag:
+            link = aliased(ShipmentTagLink)
+            labelled = aliased(Tag)
+            statement = statement.join(
+                link, Shipment.id == link.shipment_id
+            ).join(
+                labelled, link.tag_id == labelled.id
+            ).where(labelled.name == " ".join(name.split()).lower())
+
     statement = statement.order_by(Shipment.id).offset(offset).limit(limit)
     results = await session.exec(statement)
     return list(results.all())
