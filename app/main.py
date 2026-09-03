@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routers import auth, shipment, tag, user, warehouse
 from app.core.config import settings
+from app.core.logging import configure_logging
+from app.core.middleware import RequestContextMiddleware
 
 DESCRIPTION = """
 FleetLine moves parcels from a customer's door to a delivery address, through
@@ -54,6 +56,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     starting the app can never silently change the database: run
     `alembic upgrade head` instead.
     """
+    configure_logging(settings.log_level)
     yield
 
 
@@ -84,6 +87,12 @@ app.add_middleware(
     # that does not mention it rejects every authenticated request.
     allow_headers=["Authorization", "Content-Type"],
 )
+
+# Registered after CORS and therefore the outermost layer, because middleware
+# wraps in reverse order of registration. That is what makes the timing cover
+# the entire response, preflights included, and sets the request id before any
+# other code can log.
+app.add_middleware(RequestContextMiddleware)
 
 app.include_router(auth.router)
 app.include_router(user.router)

@@ -86,6 +86,8 @@ class Settings(BaseSettings):
     # Origins the dashboard is served from. A list rather than a wildcard,
     # because a wildcard cannot be combined with credentials and would let any
     # site call this API with a user's token.
+    log_level: str = "INFO"
+
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
